@@ -25,7 +25,8 @@ var (
 	boxStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#874BFD")).
-		Padding(1, 2)
+		Padding(1, 2).
+		Align(lipgloss.Left)
 		
 	titleStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFDF5")).
@@ -46,7 +47,8 @@ type model struct{
 	cpu  float64
 	ram  float64
 	disk float64
-	weather string
+	weather 	string
+	lastWeather time.Time
 	news        []string
 	lastNews    time.Time
 	tasks       []string  
@@ -287,7 +289,7 @@ func fetchTasks() tea.Cmd {
 				dateStr = fmt.Sprintf(" (Due: %s)", dueProp.Date.Start)
 			}
 
-			formattedTasks = append(formattedTasks, "☐ "+title+dateStr)
+			formattedTasks = append(formattedTasks, title+dateStr)
 		}
 
 		if len(formattedTasks) == 0 {
@@ -327,10 +329,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmds []tea.Cmd
 			cmds = append(cmds, tick(), fetchStats())
 
-			// Hourly News Check
+			// 1-Hour News check
 			if time.Since(m.lastNews) > time.Hour {
 				m.lastNews = time.Now()
 				cmds = append(cmds, fetchNews())
+			}
+
+			// 2-Hour Weather check
+			if time.Since(m.lastWeather) > 2*time.Hour {
+				m.lastWeather = time.Now()
+				cmds = append(cmds, fetchWeather())
 			}
 			
 			// 5-Minute Tasks Check
@@ -403,35 +411,37 @@ func (m model) View() string {
 		titleStyle.Render("💻 System Stats") + statsContent,
 	)
 
-	newsContent := "\n\n"
+	newsContent := ""
 	if len(m.news) == 0 {
-		newsContent += "Loading news..."
+		newsContent = "\n\nLoading news..."
 	} else {
 		for _, headline := range m.news {
-			if len(headline) > innerWidth {
-				headline = headline[:innerWidth-3] + "..."
-			}
-			newsContent += "• " + headline + "\n"
+			// Create a temporary style for the bullet point + text 
+			// to ensure it wraps correctly within the innerWidth
+			wrappedHeadline := lipgloss.NewStyle().
+				Width(innerWidth).
+				Render("• " + headline)
+			newsContent += "\n" + wrappedHeadline
 		}
 	}
 	newsBox := sized.Render(
-		titleStyle.Render("📰 Latest News") + newsContent,
+		titleStyle.Render("📰 Latest News") + "\n" + newsContent,
 	)
 
-	tasksContent := "\n\n"
+	tasksContent := ""
 	if len(m.tasks) == 0 {
-		tasksContent += "Loading tasks..."
+		tasksContent = "\n\nLoading tasks..."
 	} else {
 		for _, task := range m.tasks {
-			if len(task) > innerWidth {
-				task = task[:innerWidth-3] + "..."
-			}
-			tasksContent += task + "\n"
+			wrappedTask := lipgloss.NewStyle().
+				Width(innerWidth).
+				Render("☐ " + task) // Added a checkbox icon for flair
+			tasksContent += "\n" + wrappedTask
 		}
 	}
 
 	tasksBox := sized.Render(
-		titleStyle.Render("✅ Notion Tasks") + tasksContent,
+		titleStyle.Render("✅ Notion Tasks") + "\n" + tasksContent,
 	)
 
 	// -- Layout Construction --
