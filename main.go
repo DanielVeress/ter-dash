@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,6 +45,8 @@ type model struct{
 	ram  float64
 	disk float64
 	weather string
+	news        []string
+	lastNews    time.Time
 }
 type tickMsg time.Time
 type statsMsg struct {
@@ -53,6 +56,13 @@ type statsMsg struct {
 }
 type weatherMsg string
 type errMsg error
+type NewsItem struct {
+	Title string `xml:"title"`
+}
+type Rss struct {
+	Items []NewsItem `xml:"channel>item"`
+}
+type newsMsg []string
 
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
@@ -150,11 +160,49 @@ func fetchWeather() tea.Cmd {
 	}
 }
 
+func fetchNews() tea.Cmd {
+	return func() tea.Msg {
+		sources := map[string]string{
+			"NPR":      "https://feeds.npr.org/1001/rss.xml",
+			"Guardian": "https://www.theguardian.com/world/rss",
+			"Telex":    "https://telex.hu/rss",
+			"HVG":      "https://hvg.hu/rss",
+		}
+
+		var allHeadlines []string
+		client := &http.Client{Timeout: 5 * time.Second}
+
+		for name, url := range sources {
+			resp, err := client.Get(url)
+			if err != nil {
+				continue // Skip failed sources
+			}
+			defer resp.Body.Close()
+
+			var rss Rss
+			if err := xml.NewDecoder(resp.Body).Decode(&rss); err != nil {
+				continue
+			}
+
+			// Just take the top 2 headlines per source to keep it "minimal"
+			count := 0
+			for _, item := range rss.Items {
+				if count >= 2 { break }
+				allHeadlines = append(allHeadlines, fmt.Sprintf("[%s] %s", name, item.Title))
+				count++
+			}
+		}
+		return newsMsg(allHeadlines)
+	}
+}
+
 func (m model) Init() tea.Cmd {	
 	return tea.Batch(
 		tick(), 
 		fetchStats(), 
-		fetchWeather())
+		fetchWeather(),
+		fetchNews(),
+	)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -167,7 +215,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		
 		case tickMsg:
 			m.time = time.Time(msg)
-			return m, tea.Batch(tick(), fetchStats())
+
+			// Every hour check
+			var newsCmd tea.Cmd
+			if time.Since(m.lastNews) > time.Hour {
+				m.lastNews = time.Now()
+				newsCmd = fetchNews()
+			}
+			
+			return m, tea.Batch(tick(), fetchStats(), newsCmd)
 		
 		case statsMsg:
 			m.cpu = msg.cpu
@@ -177,6 +233,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case weatherMsg:
 			m.weather = string(msg)
+			return m, nil
+
+		case newsMsg:
+			m.news = msg
+			m.lastNews = time.Now()
 			return m, nil
 
 		case errMsg:
@@ -207,13 +268,28 @@ func (m model) View() string {
 	weatherBox := boxStyle.Render(
 		titleStyle.Render("⛅ Local Weather") + "\n\n" + m.weather,
 	)
-    statsContent := fmt.Sprintf("\n\nCPU:  %5.1f%%\nRAM:  %5.1f%%\nDisk: %5.1f%%", m.cpu, m.ram, m.disk)
+    
+	statsContent := fmt.Sprintf("\n\nCPU:  %5.1f%%\nRAM:  %5.1f%%\nDisk: %5.1f%%", m.cpu, m.ram, m.disk)
 	statsBox := boxStyle.Render(
 		titleStyle.Render("💻 System Stats") + statsContent,
 	)
+	
+	newsContent := "\n\n"
+	if len(m.news) == 0 {
+		newsContent += "Loading news..."
+	} else {
+		for _, headline := range m.news {
+			// Basic wrapping: if headline is too long, truncate it
+			if len(headline) > 35 {
+				headline = headline[:32] + "..."
+			}
+			newsContent += "• " + headline + "\n"
+		}
+	}
 	newsBox := boxStyle.Render(
-		titleStyle.Render("📰 News") + "\n\nFetching articles...",
+		titleStyle.Render("📰 Latest News") + newsContent,
 	)
+	
 	tasksBox := boxStyle.Render(
 		titleStyle.Render("✅ Notion Tasks") + "\n\nLoading tasks...",
 	)
