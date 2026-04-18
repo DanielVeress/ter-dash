@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -40,6 +43,7 @@ type model struct{
 	cpu  float64
 	ram  float64
 	disk float64
+	weather string
 }
 type tickMsg time.Time
 type statsMsg struct {
@@ -47,6 +51,8 @@ type statsMsg struct {
 	ram  float64
 	disk float64
 }
+type weatherMsg string
+type errMsg error
 
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
@@ -73,8 +79,62 @@ func fetchStats() tea.Cmd {
 	}
 }
 
+func formatWeatherLocation(raw string) string {
+	parts := strings.SplitN(raw, ":", 2)
+	if len(parts) != 2 {
+		return raw // Fallback if the string format is unexpected
+	}
+	locs := strings.Split(parts[0], ",")
+	
+	// If we have at least city, county, and country
+	if len(locs) >= 3 {
+		city := strings.TrimSpace(locs[0])
+		country := strings.TrimSpace(locs[len(locs)-1])
+
+		// Capitalize
+		if len(city) > 0 {
+			city = strings.ToUpper(string(city[0])) + city[1:]
+		}
+		country = strings.ToUpper(country)
+
+		return fmt.Sprintf("%s, %s:%s", city, country, parts[1])
+	}
+
+	return raw
+}
+
+func fetchWeather() tea.Cmd {
+	return func() tea.Msg {
+		client := &http.Client{Timeout: 10 * time.Second}
+		
+		res, err := client.Get("https://wttr.in/?format=3")
+		if err != nil {
+			return errMsg(err)
+		}
+		defer res.Body.Close()
+
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			return errMsg(err)
+		}
+		weatherStr := strings.TrimSpace(string(body))
+		
+		// If the API sends back an HTML error page by accident, catch it
+		if strings.Contains(weatherStr, "HTML") || weatherStr == "" {
+			return errMsg(fmt.Errorf("API unavailable"))
+		}
+
+		weatherStr = formatWeatherLocation(weatherStr)
+
+		return weatherMsg(weatherStr)
+	}
+}
+
 func (m model) Init() tea.Cmd {	
-	return tea.Batch(tick(), fetchStats())
+	return tea.Batch(
+		tick(), 
+		fetchStats(), 
+		fetchWeather())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -93,6 +153,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cpu = msg.cpu
 			m.ram = msg.ram
 			m.disk = msg.disk
+			return m, nil
+
+		case weatherMsg:
+			m.weather = string(msg)
+			return m, nil
+
+		case errMsg:
+			m.weather = "Weather unavailable right now"
 			return m, nil
 	}
 	return m, nil
@@ -117,7 +185,7 @@ func (m model) View() string {
 
 	// -- Dashboard Quadrants --
 	weatherBox := boxStyle.Render(
-		titleStyle.Render("⛅ Weather (Uppsala)") + "\n\nLoading wttr.in...",
+		titleStyle.Render("⛅ Local Weather") + "\n\n" + m.weather,
 	)
     statsContent := fmt.Sprintf("\n\nCPU:  %5.1f%%\nRAM:  %5.1f%%\nDisk: %5.1f%%", m.cpu, m.ram, m.disk)
 	statsBox := boxStyle.Render(
@@ -144,6 +212,7 @@ func (m model) View() string {
 func main() {
 	initialModel := model{
         time: time.Now(),
+		weather: "Fetching weather...",
     }		
 
 	p := tea.NewProgram(initialModel, tea.WithAltScreen()) 
