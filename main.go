@@ -103,6 +103,26 @@ func formatWeatherLocation(raw string) string {
 	return raw
 }
 
+func getSeason(t time.Time) string {
+	// If the time hasn't been set yet, return a default
+	if t.IsZero() {
+		return "..."
+	}
+
+	switch t.Month() {
+		case time.March, time.April, time.May:
+			return "🌸 Spring"
+		case time.June, time.July, time.August:
+			return "☀️ Summer"
+		case time.September, time.October, time.November:
+			return "🍂 Autumn"
+		case time.December, time.January, time.February:
+			return "❄️ Winter"
+		default:
+			return "🌍 Unknown"
+	}
+}
+
 func fetchWeather() tea.Cmd {
 	return func() tea.Msg {
 		client := &http.Client{Timeout: 10 * time.Second}
@@ -175,8 +195,8 @@ func (m model) View() string {
       _|      _|_|_|  _|        _|_|_|      _|_|_|  _|_|_|      _|    _|`
 	
 	// Time
-	currentTime := m.time.Format("Monday, 02 Jan 2006 | 15:04")
-	season := "🌸 Spring" 
+	currentTime := m.time.Format("Monday, 02 Jan 2006 | 15:04:05")
+	season := getSeason(m.time)
 	
 	headerInfo := fmt.Sprintf("%s\n%s\n\nPress 'q' to quit", currentTime, season)
 	
