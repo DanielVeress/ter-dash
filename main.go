@@ -25,9 +25,7 @@ var (
 	boxStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#874BFD")).
-		Padding(1, 2).
-		Width(100).
-		Height(10)
+		Padding(1, 2)
 		
 	titleStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFDF5")).
@@ -42,6 +40,8 @@ var (
 )
 
 type model struct{
+	width int 
+	height int
 	time time.Time
 	cpu  float64
 	ram  float64
@@ -316,6 +316,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Quit
 				}	
 		
+		case tea.WindowSizeMsg:
+			m.width = msg.Width
+			m.height = msg.Height
+			return m, nil
+
 		case tickMsg:
 			m.time = time.Time(msg)
 
@@ -365,61 +370,67 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	asciiArt := `
-  _|_|_|_|_|                    _|_|_|                          _|      
-      _|      _|_|    _|  _|_|  _|    _|    _|_|_|    _|_|_|    _|_|_|  
+  _|_|_|_|_|                    _|_|_|                          _|
+      _|      _|_|    _|  _|_|  _|    _|    _|_|_|    _|_|_|    _|_|_|
       _|    _|_|_|_|  _|_|      _|    _|  _|    _|  _|_|        _|    _|
       _|    _|        _|        _|    _|  _|    _|      _|_|    _|    _|
       _|      _|_|_|  _|        _|_|_|      _|_|_|  _|_|_|      _|    _|`
-	
+
 	// Time
 	currentTime := m.time.Format("Monday, 02 Jan 2006 | 15:04:05")
 	season := getSeason(m.time)
-	
+
 	headerInfo := fmt.Sprintf("%s\n%s\n\nPress 'q' to quit", currentTime, season)
-	
+
 	// Join the ASCII art and the Time info side-by-side
 	header := lipgloss.JoinHorizontal(lipgloss.Top, asciiStyle.Render(asciiArt), headerInfo)
 
+	// Compute column width from terminal size.
+	// appStyle has Margin(1,2) → 4 horizontal chars consumed; two columns share the rest.
+	colWidth := (m.width - 6) / 2
+	// innerWidth: subtract border (2) + padding left+right (4)
+	innerWidth := colWidth - 6
+	innerWidth = max(innerWidth, 10)
+	sized := boxStyle.Width(colWidth)
+
 	// -- Dashboard Quadrants --
-	weatherBox := boxStyle.Render(
+	weatherBox := sized.Render(
 		titleStyle.Render("⛅ Local Weather") + "\n\n" + m.weather,
 	)
-    
+
 	statsContent := fmt.Sprintf("\n\nCPU:  %5.1f%%\nRAM:  %5.1f%%\nDisk: %5.1f%%", m.cpu, m.ram, m.disk)
-	statsBox := boxStyle.Render(
+	statsBox := sized.Render(
 		titleStyle.Render("💻 System Stats") + statsContent,
 	)
-	
+
 	newsContent := "\n\n"
 	if len(m.news) == 0 {
 		newsContent += "Loading news..."
 	} else {
 		for _, headline := range m.news {
-			// Basic wrapping: if headline is too long, truncate it
-			if len(headline) > 35 {
-				headline = headline[:32] + "..."
+			if len(headline) > innerWidth {
+				headline = headline[:innerWidth-3] + "..."
 			}
 			newsContent += "• " + headline + "\n"
 		}
 	}
-	newsBox := boxStyle.Render(
+	newsBox := sized.Render(
 		titleStyle.Render("📰 Latest News") + newsContent,
 	)
-	
+
 	tasksContent := "\n\n"
 	if len(m.tasks) == 0 {
 		tasksContent += "Loading tasks..."
 	} else {
 		for _, task := range m.tasks {
-			// Truncate to fit the box width
-			if len(task) > 90 {
-				task = task[:90] + "..."
+			if len(task) > innerWidth {
+				task = task[:innerWidth-3] + "..."
 			}
 			tasksContent += task + "\n"
 		}
 	}
 
-	tasksBox := boxStyle.Render(
+	tasksBox := sized.Render(
 		titleStyle.Render("✅ Notion Tasks") + tasksContent,
 	)
 
