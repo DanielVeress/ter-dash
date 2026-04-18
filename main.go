@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -24,7 +26,7 @@ var (
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#874BFD")).
 		Padding(1, 2).
-		Width(40).
+		Width(100).
 		Height(10)
 		
 	titleStyle = lipgloss.NewStyle().
@@ -47,6 +49,8 @@ type model struct{
 	weather string
 	news        []string
 	lastNews    time.Time
+	tasks       []string  
+	lastTasks   time.Time
 }
 type tickMsg time.Time
 type statsMsg struct {
@@ -63,6 +67,24 @@ type Rss struct {
 	Items []NewsItem `xml:"channel>item"`
 }
 type newsMsg []string
+
+type NotionResponse struct {
+	Results []NotionPage `json:"results"`
+}
+type NotionProperty struct {
+	Type  string `json:"type"`
+	Title []struct {
+		PlainText string `json:"plain_text"`
+	} `json:"title"`
+	Date *struct {
+		Start string `json:"start"`
+	} `json:"date"`
+}
+type NotionPage struct {
+	Properties map[string]NotionProperty `json:"properties"`
+}
+type tasksMsg []string
+
 
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
@@ -196,12 +218,93 @@ func fetchNews() tea.Cmd {
 	}
 }
 
+func fetchTasks() tea.Cmd {
+	return func() tea.Msg {
+		apiKey := os.Getenv("NOTION_API_KEY")
+		if apiKey == "" {
+			return tasksMsg([]string{"Error: NOTION_API_KEY not set"})
+		}
+
+		dbID := "29a16b865dc280bbbbe2cb1691e93340"
+		url := fmt.Sprintf("https://api.notion.com/v1/databases/%s/query", dbID)
+
+		// Create the JSON payload for sorting and limiting
+		payload := []byte(`{
+			"page_size": 10,
+			"filter": {
+				"property": "Status",
+				"status": {
+					"does_not_equal": "Done"
+				}
+			},
+			"sorts": [
+				{
+					"property": "Due Date",
+					"direction": "ascending"
+				}
+			]
+		}`)
+
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
+		if err != nil {
+			return tasksMsg([]string{"Error building request"})
+		}
+
+		// Required Notion Headers
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("Notion-Version", "2022-06-28")
+		req.Header.Set("Content-Type", "application/json")
+
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return tasksMsg([]string{"Error reaching Notion"})
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return tasksMsg([]string{fmt.Sprintf("Notion API error %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))})
+		}
+
+		var notionResp NotionResponse
+		if err := json.NewDecoder(resp.Body).Decode(&notionResp); err != nil {
+			return tasksMsg([]string{"Error parsing Notion data"})
+		}
+
+		var formattedTasks []string
+		for _, page := range notionResp.Results {
+			title := "Untitled"
+			for _, prop := range page.Properties {
+				if prop.Type == "title" && len(prop.Title) > 0 {
+					title = prop.Title[0].PlainText
+					break
+				}
+			}
+
+			dateStr := ""
+			if dueProp, ok := page.Properties["Due Date"]; ok && dueProp.Date != nil {
+				dateStr = fmt.Sprintf(" (Due: %s)", dueProp.Date.Start)
+			}
+
+			formattedTasks = append(formattedTasks, "☐ "+title+dateStr)
+		}
+
+		if len(formattedTasks) == 0 {
+			formattedTasks = append(formattedTasks, "No upcoming tasks!")
+		}
+
+		return tasksMsg(formattedTasks)
+	}
+}
+
 func (m model) Init() tea.Cmd {	
 	return tea.Batch(
 		tick(), 
 		fetchStats(), 
 		fetchWeather(),
 		fetchNews(),
+		fetchTasks(),
 	)
 }
 
@@ -216,14 +319,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tickMsg:
 			m.time = time.Time(msg)
 
-			// Every hour check
-			var newsCmd tea.Cmd
+			var cmds []tea.Cmd
+			cmds = append(cmds, tick(), fetchStats())
+
+			// Hourly News Check
 			if time.Since(m.lastNews) > time.Hour {
 				m.lastNews = time.Now()
-				newsCmd = fetchNews()
+				cmds = append(cmds, fetchNews())
 			}
 			
-			return m, tea.Batch(tick(), fetchStats(), newsCmd)
+			// 5-Minute Tasks Check
+			if time.Since(m.lastTasks) > 5*time.Minute {
+				m.lastTasks = time.Now()
+				cmds = append(cmds, fetchTasks())
+			}
+			
+			return m, tea.Batch(cmds...)
 		
 		case statsMsg:
 			m.cpu = msg.cpu
@@ -238,6 +349,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case newsMsg:
 			m.news = msg
 			m.lastNews = time.Now()
+			return m, nil
+
+		case tasksMsg:
+			m.tasks = msg
+			m.lastTasks = time.Now()
 			return m, nil
 
 		case errMsg:
@@ -290,8 +406,21 @@ func (m model) View() string {
 		titleStyle.Render("📰 Latest News") + newsContent,
 	)
 	
+	tasksContent := "\n\n"
+	if len(m.tasks) == 0 {
+		tasksContent += "Loading tasks..."
+	} else {
+		for _, task := range m.tasks {
+			// Truncate to fit the box width
+			if len(task) > 90 {
+				task = task[:90] + "..."
+			}
+			tasksContent += task + "\n"
+		}
+	}
+
 	tasksBox := boxStyle.Render(
-		titleStyle.Render("✅ Notion Tasks") + "\n\nLoading tasks...",
+		titleStyle.Render("✅ Notion Tasks") + tasksContent,
 	)
 
 	// -- Layout Construction --
