@@ -19,29 +19,45 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
+type Theme struct {
+	Border   lipgloss.Color
+	TitleFg  lipgloss.Color
+	TitleBg  lipgloss.Color
+	AsciiArt lipgloss.Color
+	Error    lipgloss.Color
+}
+
+var currentTheme = Theme{
+	Border:   lipgloss.Color("#874BFD"),
+	TitleFg:  lipgloss.Color("#FFFDF5"),
+	TitleBg:  lipgloss.Color("#25A065"),
+	AsciiArt: lipgloss.Color("#FF7CCB"),
+	Error:    lipgloss.Color("#FF5555"),
+}
+
 var (
 	appStyle = lipgloss.NewStyle().Margin(1, 2)
 
 	boxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#874BFD")).
+			BorderForeground(currentTheme.Border).
 			Padding(1, 2).
 			Align(lipgloss.Left)
 
 	titleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFDF5")).
-			Background(lipgloss.Color("#25A065")).
+			Foreground(currentTheme.TitleFg).
+			Background(currentTheme.TitleBg).
 			Padding(0, 1).
 			Bold(true)
 
 	asciiStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF7CCB")).
+			Foreground(currentTheme.AsciiArt).
 			Bold(true).
 			MarginRight(4)
 
 	selectedTaskStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FFFDF5")).
-				Background(lipgloss.Color("#874BFD")).
+				Foreground(currentTheme.TitleFg).
+				Background(currentTheme.Border).
 				Bold(true)
 )
 
@@ -513,7 +529,7 @@ func (m model) View() string {
 	statusBar := ""
 	if m.err != nil {
 		statusBar = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF5555")).
+			Foreground(currentTheme.Error).
 			Width(m.width).
 			Render("  ✗ " + m.err.Error())
 	}
