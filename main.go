@@ -41,7 +41,7 @@ var (
 )
 
 type model struct{
-	width int 
+	width int
 	height int
 	time time.Time
 	cpu  float64
@@ -51,8 +51,9 @@ type model struct{
 	lastWeather time.Time
 	news        []string
 	lastNews    time.Time
-	tasks       []string  
+	tasks       []string
 	lastTasks   time.Time
+	notionKey   string
 }
 type tickMsg time.Time
 type statsMsg struct {
@@ -220,9 +221,8 @@ func fetchNews() tea.Cmd {
 	}
 }
 
-func fetchTasks() tea.Cmd {
+func fetchTasks(apiKey string) tea.Cmd {
 	return func() tea.Msg {
-		apiKey := os.Getenv("NOTION_API_KEY")
 		if apiKey == "" {
 			return tasksMsg([]string{"Error: NOTION_API_KEY not set"})
 		}
@@ -306,7 +306,7 @@ func (m model) Init() tea.Cmd {
 		fetchStats(), 
 		fetchWeather(),
 		fetchNews(),
-		fetchTasks(),
+		fetchTasks(m.notionKey),
 	)
 }
 
@@ -344,7 +344,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// 5-Minute Tasks Check
 			if time.Since(m.lastTasks) > 5*time.Minute {
 				m.lastTasks = time.Now()
-				cmds = append(cmds, fetchTasks())
+				cmds = append(cmds, fetchTasks(m.notionKey))
 			}
 			
 			return m, tea.Batch(cmds...)
@@ -457,9 +457,10 @@ func (m model) View() string {
 
 func main() {
 	initialModel := model{
-        time: time.Now(),
-		weather: "Fetching weather...",
-    }		
+		time:      time.Now(),
+		weather:   "Fetching weather...",
+		notionKey: os.Getenv("NOTION_API_KEY"),
+	}		
 
 	p := tea.NewProgram(initialModel, tea.WithAltScreen()) 
 	if _, err := p.Run(); err != nil {
