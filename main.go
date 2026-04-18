@@ -21,41 +21,48 @@ import (
 
 var (
 	appStyle = lipgloss.NewStyle().Margin(1, 2)
-	
+
 	boxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#874BFD")).
-		Padding(1, 2).
-		Align(lipgloss.Left)
-		
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#874BFD")).
+			Padding(1, 2).
+			Align(lipgloss.Left)
+
 	titleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFDF5")).
-		Background(lipgloss.Color("#25A065")).
-		Padding(0, 1).
-		Bold(true)
-		
+			Foreground(lipgloss.Color("#FFFDF5")).
+			Background(lipgloss.Color("#25A065")).
+			Padding(0, 1).
+			Bold(true)
+
 	asciiStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FF7CCB")).
-		Bold(true).
-		MarginRight(4)
+			Foreground(lipgloss.Color("#FF7CCB")).
+			Bold(true).
+			MarginRight(4)
+
+	selectedTaskStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FFFDF5")).
+				Background(lipgloss.Color("#874BFD")).
+				Bold(true)
 )
 
-type model struct{
-	width int
-	height int
-	time time.Time
-	cpu  float64
-	ram  float64
-	disk float64
-	weather 	string
+type model struct {
+	width       int
+	height      int
+	time        time.Time
+	cpu         float64
+	ram         float64
+	disk        float64
+	weather     string
 	lastWeather time.Time
 	news        []string
 	lastNews    time.Time
-	tasks       []string
+	tasks       []notionTask
+	cursor      int
 	lastTasks   time.Time
 	notionKey   string
 	err         error
 }
+
 type tickMsg time.Time
 type statsMsg struct {
 	cpu  float64
@@ -72,6 +79,11 @@ type Rss struct {
 }
 type newsMsg []string
 
+type notionTask struct {
+	id    string
+	label string
+}
+
 type NotionResponse struct {
 	Results []NotionPage `json:"results"`
 }
@@ -85,11 +97,12 @@ type NotionProperty struct {
 	} `json:"date"`
 }
 type NotionPage struct {
-	Properties map[string]NotionProperty `json:"properties"`
+	ID         string                     `json:"id"`
+	Properties map[string]NotionProperty  `json:"properties"`
 }
-type tasksMsg []string
+type tasksMsg []notionTask
 type taskErrMsg struct{ err error }
-
+type taskDoneMsg struct{ index int }
 
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
@@ -119,16 +132,14 @@ func fetchStats() tea.Cmd {
 func formatWeatherLocation(raw string) string {
 	parts := strings.SplitN(raw, ":", 2)
 	if len(parts) != 2 {
-		return raw // Fallback if the string format is unexpected
+		return raw
 	}
 	locs := strings.Split(parts[0], ",")
-	
-	// If we have at least city, county, and country
+
 	if len(locs) >= 3 {
 		city := strings.TrimSpace(locs[0])
 		country := strings.TrimSpace(locs[len(locs)-1])
 
-		// Capitalize
 		if len(city) > 0 {
 			city = strings.ToUpper(string(city[0])) + city[1:]
 		}
@@ -141,29 +152,28 @@ func formatWeatherLocation(raw string) string {
 }
 
 func getSeason(t time.Time) string {
-	// If the time hasn't been set yet, return a default
 	if t.IsZero() {
 		return "..."
 	}
 
 	switch t.Month() {
-		case time.March, time.April, time.May:
-			return "🌸 Spring"
-		case time.June, time.July, time.August:
-			return "☀️ Summer"
-		case time.September, time.October, time.November:
-			return "🍂 Autumn"
-		case time.December, time.January, time.February:
-			return "❄️ Winter"
-		default:
-			return "🌍 Unknown"
+	case time.March, time.April, time.May:
+		return "🌸 Spring"
+	case time.June, time.July, time.August:
+		return "☀️ Summer"
+	case time.September, time.October, time.November:
+		return "🍂 Autumn"
+	case time.December, time.January, time.February:
+		return "❄️ Winter"
+	default:
+		return "🌍 Unknown"
 	}
 }
 
 func fetchWeather() tea.Cmd {
 	return func() tea.Msg {
 		client := &http.Client{Timeout: 10 * time.Second}
-		
+
 		res, err := client.Get("https://wttr.in/?format=3")
 		if err != nil {
 			return errMsg(err)
@@ -175,8 +185,7 @@ func fetchWeather() tea.Cmd {
 			return errMsg(err)
 		}
 		weatherStr := strings.TrimSpace(string(body))
-		
-		// If the API sends back an HTML error page by accident, catch it
+
 		if strings.Contains(weatherStr, "HTML") || weatherStr == "" {
 			return errMsg(fmt.Errorf("API unavailable"))
 		}
@@ -202,7 +211,7 @@ func fetchNews() tea.Cmd {
 		for name, url := range sources {
 			resp, err := client.Get(url)
 			if err != nil {
-				continue // Skip failed sources
+				continue
 			}
 			defer resp.Body.Close()
 
@@ -211,10 +220,11 @@ func fetchNews() tea.Cmd {
 				continue
 			}
 
-			// Just take the top 2 headlines per source to keep it "minimal"
 			count := 0
 			for _, item := range rss.Items {
-				if count >= 2 { break }
+				if count >= 2 {
+					break
+				}
 				allHeadlines = append(allHeadlines, fmt.Sprintf("[%s] %s", name, item.Title))
 				count++
 			}
@@ -232,7 +242,6 @@ func fetchTasks(apiKey string) tea.Cmd {
 		dbID := "29a16b865dc280bbbbe2cb1691e93340"
 		url := fmt.Sprintf("https://api.notion.com/v1/databases/%s/query", dbID)
 
-		// Create the JSON payload for sorting and limiting
 		payload := []byte(`{
 			"page_size": 10,
 			"filter": {
@@ -254,7 +263,6 @@ func fetchTasks(apiKey string) tea.Cmd {
 			return taskErrMsg{err: fmt.Errorf("error building request: %w", err)}
 		}
 
-		// Required Notion Headers
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 		req.Header.Set("Notion-Version", "2022-06-28")
 		req.Header.Set("Content-Type", "application/json")
@@ -276,7 +284,7 @@ func fetchTasks(apiKey string) tea.Cmd {
 			return taskErrMsg{err: fmt.Errorf("error parsing Notion response: %w", err)}
 		}
 
-		var formattedTasks []string
+		var tasks []notionTask
 		for _, page := range notionResp.Results {
 			title := "Untitled"
 			for _, prop := range page.Properties {
@@ -291,21 +299,51 @@ func fetchTasks(apiKey string) tea.Cmd {
 				dateStr = fmt.Sprintf(" (Due: %s)", dueProp.Date.Start)
 			}
 
-			formattedTasks = append(formattedTasks, title+dateStr)
+			tasks = append(tasks, notionTask{id: page.ID, label: title + dateStr})
 		}
 
-		if len(formattedTasks) == 0 {
-			formattedTasks = append(formattedTasks, "No upcoming tasks!")
+		if len(tasks) == 0 {
+			tasks = append(tasks, notionTask{label: "No upcoming tasks!"})
 		}
 
-		return tasksMsg(formattedTasks)
+		return tasksMsg(tasks)
 	}
 }
 
-func (m model) Init() tea.Cmd {	
+func markTaskDone(pageID, apiKey string, index int) tea.Cmd {
+	return func() tea.Msg {
+		payload := []byte(`{"properties":{"Status":{"status":{"name":"Done"}}}}`)
+		url := fmt.Sprintf("https://api.notion.com/v1/pages/%s", pageID)
+
+		req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(payload))
+		if err != nil {
+			return taskErrMsg{err: fmt.Errorf("error building request: %w", err)}
+		}
+
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("Notion-Version", "2022-06-28")
+		req.Header.Set("Content-Type", "application/json")
+
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return taskErrMsg{err: fmt.Errorf("error reaching Notion: %w", err)}
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return taskErrMsg{err: fmt.Errorf("Notion API error %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))}
+		}
+
+		return taskDoneMsg{index: index}
+	}
+}
+
+func (m model) Init() tea.Cmd {
 	return tea.Batch(
-		tick(), 
-		fetchStats(), 
+		tick(),
+		fetchStats(),
 		fetchWeather(),
 		fetchNews(),
 		fetchTasks(m.notionKey),
@@ -314,71 +352,93 @@ func (m model) Init() tea.Cmd {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-		case tea.KeyMsg:
-			switch msg.String() {
-				case "ctrl+c", "q":
-					return m, tea.Quit
-				}	
-		
-		case tea.WindowSizeMsg:
-			m.width = msg.Width
-			m.height = msg.Height
-			return m, nil
-
-		case tickMsg:
-			m.time = time.Time(msg)
-
-			var cmds []tea.Cmd
-			cmds = append(cmds, tick(), fetchStats())
-
-			// 1-Hour News check
-			if time.Since(m.lastNews) > time.Hour {
-				m.lastNews = time.Now()
-				cmds = append(cmds, fetchNews())
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q":
+			return m, tea.Quit
+		case "j", "down":
+			if m.cursor < len(m.tasks)-1 {
+				m.cursor++
 			}
-
-			// 2-Hour Weather check
-			if time.Since(m.lastWeather) > 2*time.Hour {
-				m.lastWeather = time.Now()
-				cmds = append(cmds, fetchWeather())
+		case "k", "up":
+			if m.cursor > 0 {
+				m.cursor--
 			}
-			
-			// 5-Minute Tasks Check
-			if time.Since(m.lastTasks) > 5*time.Minute {
-				m.lastTasks = time.Now()
-				cmds = append(cmds, fetchTasks(m.notionKey))
+		case "enter":
+			if len(m.tasks) > 0 && m.tasks[m.cursor].id != "" {
+				return m, markTaskDone(m.tasks[m.cursor].id, m.notionKey, m.cursor)
 			}
-			
-			return m, tea.Batch(cmds...)
-		
-		case statsMsg:
-			m.cpu = msg.cpu
-			m.ram = msg.ram
-			m.disk = msg.disk
-			return m, nil
+		}
 
-		case weatherMsg:
-			m.weather = string(msg)
-			return m, nil
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
 
-		case newsMsg:
-			m.news = msg
+	case tickMsg:
+		m.time = time.Time(msg)
+
+		var cmds []tea.Cmd
+		cmds = append(cmds, tick(), fetchStats())
+
+		if time.Since(m.lastNews) > time.Hour {
 			m.lastNews = time.Now()
-			return m, nil
+			cmds = append(cmds, fetchNews())
+		}
 
-		case tasksMsg:
-			m.tasks = msg
-			m.err = nil
+		if time.Since(m.lastWeather) > 2*time.Hour {
+			m.lastWeather = time.Now()
+			cmds = append(cmds, fetchWeather())
+		}
+
+		if time.Since(m.lastTasks) > 5*time.Minute {
 			m.lastTasks = time.Now()
-			return m, nil
+			cmds = append(cmds, fetchTasks(m.notionKey))
+		}
 
-		case taskErrMsg:
-			m.err = msg.err
-			return m, nil
+		return m, tea.Batch(cmds...)
 
-		case errMsg:
-			m.weather = "Weather unavailable right now"
-			return m, nil
+	case statsMsg:
+		m.cpu = msg.cpu
+		m.ram = msg.ram
+		m.disk = msg.disk
+		return m, nil
+
+	case weatherMsg:
+		m.weather = string(msg)
+		return m, nil
+
+	case newsMsg:
+		m.news = msg
+		m.lastNews = time.Now()
+		return m, nil
+
+	case tasksMsg:
+		m.tasks = msg
+		m.cursor = 0
+		m.err = nil
+		m.lastTasks = time.Now()
+		return m, nil
+
+	case taskDoneMsg:
+		if msg.index >= 0 && msg.index < len(m.tasks) {
+			m.tasks = append(m.tasks[:msg.index], m.tasks[msg.index+1:]...)
+			if m.cursor >= len(m.tasks) && m.cursor > 0 {
+				m.cursor--
+			}
+			if len(m.tasks) == 0 {
+				m.tasks = []notionTask{{label: "No upcoming tasks!"}}
+			}
+		}
+		return m, nil
+
+	case taskErrMsg:
+		m.err = msg.err
+		return m, nil
+
+	case errMsg:
+		m.weather = "Weather unavailable right now"
+		return m, nil
 	}
 	return m, nil
 }
@@ -391,24 +451,18 @@ func (m model) View() string {
       _|    _|        _|        _|    _|  _|    _|      _|_|    _|    _|
       _|      _|_|_|  _|        _|_|_|      _|_|_|  _|_|_|      _|    _|`
 
-	// Time
 	currentTime := m.time.Format("Monday, 02 Jan 2006 | 15:04:05")
 	season := getSeason(m.time)
 
-	headerInfo := fmt.Sprintf("%s\n%s\n\nPress 'q' to quit", currentTime, season)
+	headerInfo := fmt.Sprintf("%s\n%s\n\nPress 'q' to quit | j/k to navigate tasks | Enter to mark done", currentTime, season)
 
-	// Join the ASCII art and the Time info side-by-side
 	header := lipgloss.JoinHorizontal(lipgloss.Top, asciiStyle.Render(asciiArt), headerInfo)
 
-	// Compute column width from terminal size.
-	// appStyle has Margin(1,2) → 4 horizontal chars consumed; two columns share the rest.
 	colWidth := (m.width - 6) / 2
-	// innerWidth: subtract border (2) + padding left+right (4)
 	innerWidth := colWidth - 6
 	innerWidth = max(innerWidth, 10)
 	sized := boxStyle.Width(colWidth)
 
-	// -- Dashboard Quadrants --
 	weatherBox := sized.Render(
 		titleStyle.Render("⛅ Local Weather") + "\n\n" + m.weather,
 	)
@@ -423,8 +477,6 @@ func (m model) View() string {
 		newsContent = "\n\nLoading news..."
 	} else {
 		for _, headline := range m.news {
-			// Create a temporary style for the bullet point + text 
-			// to ensure it wraps correctly within the innerWidth
 			wrappedHeadline := lipgloss.NewStyle().
 				Width(innerWidth).
 				Render("• " + headline)
@@ -439,11 +491,14 @@ func (m model) View() string {
 	if len(m.tasks) == 0 {
 		tasksContent = "\n\nLoading tasks..."
 	} else {
-		for _, task := range m.tasks {
-			wrappedTask := lipgloss.NewStyle().
-				Width(innerWidth).
-				Render("☐ " + task) // Added a checkbox icon for flair
-			tasksContent += "\n" + wrappedTask
+		for i, task := range m.tasks {
+			var rendered string
+			if i == m.cursor && task.id != "" {
+				rendered = selectedTaskStyle.Width(innerWidth).Render("▶ " + task.label)
+			} else {
+				rendered = lipgloss.NewStyle().Width(innerWidth).Render("☐ " + task.label)
+			}
+			tasksContent += "\n" + rendered
 		}
 	}
 
@@ -451,11 +506,9 @@ func (m model) View() string {
 		titleStyle.Render("✅ Notion Tasks") + "\n" + tasksContent,
 	)
 
-	// -- Layout Construction --
-	// Stack the boxes vertically to create columns
-	leftColumn 	:= lipgloss.JoinVertical(lipgloss.Left, statsBox, newsBox)
+	leftColumn := lipgloss.JoinVertical(lipgloss.Left, statsBox, newsBox)
 	rightColumn := lipgloss.JoinVertical(lipgloss.Left, weatherBox, tasksBox)
-	grid 		:= lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, rightColumn)
+	grid := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, rightColumn)
 
 	statusBar := ""
 	if m.err != nil {
@@ -467,7 +520,6 @@ func (m model) View() string {
 
 	finalUI := lipgloss.JoinVertical(lipgloss.Left, header, grid, statusBar)
 
-	// Return the whole thing wrapped in our app-level margins
 	return appStyle.Render(finalUI)
 }
 
@@ -476,9 +528,9 @@ func main() {
 		time:      time.Now(),
 		weather:   "Fetching weather...",
 		notionKey: os.Getenv("NOTION_API_KEY"),
-	}		
+	}
 
-	p := tea.NewProgram(initialModel, tea.WithAltScreen()) 
+	p := tea.NewProgram(initialModel, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Println("Error running program:", err)
 		os.Exit(1)
