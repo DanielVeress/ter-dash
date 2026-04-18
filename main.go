@@ -54,6 +54,7 @@ type model struct{
 	tasks       []string
 	lastTasks   time.Time
 	notionKey   string
+	err         error
 }
 type tickMsg time.Time
 type statsMsg struct {
@@ -87,6 +88,7 @@ type NotionPage struct {
 	Properties map[string]NotionProperty `json:"properties"`
 }
 type tasksMsg []string
+type taskErrMsg struct{ err error }
 
 
 func tick() tea.Cmd {
@@ -224,7 +226,7 @@ func fetchNews() tea.Cmd {
 func fetchTasks(apiKey string) tea.Cmd {
 	return func() tea.Msg {
 		if apiKey == "" {
-			return tasksMsg([]string{"Error: NOTION_API_KEY not set"})
+			return taskErrMsg{err: fmt.Errorf("NOTION_API_KEY not set")}
 		}
 
 		dbID := "29a16b865dc280bbbbe2cb1691e93340"
@@ -249,7 +251,7 @@ func fetchTasks(apiKey string) tea.Cmd {
 
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
 		if err != nil {
-			return tasksMsg([]string{"Error building request"})
+			return taskErrMsg{err: fmt.Errorf("error building request: %w", err)}
 		}
 
 		// Required Notion Headers
@@ -260,18 +262,18 @@ func fetchTasks(apiKey string) tea.Cmd {
 		client := &http.Client{Timeout: 5 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
-			return tasksMsg([]string{"Error reaching Notion"})
+			return taskErrMsg{err: fmt.Errorf("error reaching Notion: %w", err)}
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
-			return tasksMsg([]string{fmt.Sprintf("Notion API error %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))})
+			return taskErrMsg{err: fmt.Errorf("Notion API error %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))}
 		}
 
 		var notionResp NotionResponse
 		if err := json.NewDecoder(resp.Body).Decode(&notionResp); err != nil {
-			return tasksMsg([]string{"Error parsing Notion data"})
+			return taskErrMsg{err: fmt.Errorf("error parsing Notion response: %w", err)}
 		}
 
 		var formattedTasks []string
@@ -366,7 +368,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case tasksMsg:
 			m.tasks = msg
+			m.err = nil
 			m.lastTasks = time.Now()
+			return m, nil
+
+		case taskErrMsg:
+			m.err = msg.err
 			return m, nil
 
 		case errMsg:
@@ -449,8 +456,17 @@ func (m model) View() string {
 	leftColumn 	:= lipgloss.JoinVertical(lipgloss.Left, statsBox, newsBox)
 	rightColumn := lipgloss.JoinVertical(lipgloss.Left, weatherBox, tasksBox)
 	grid 		:= lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, rightColumn)
-	finalUI 	:= lipgloss.JoinVertical(lipgloss.Left, header, grid)
-	
+
+	statusBar := ""
+	if m.err != nil {
+		statusBar = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FF5555")).
+			Width(m.width).
+			Render("  ✗ " + m.err.Error())
+	}
+
+	finalUI := lipgloss.JoinVertical(lipgloss.Left, header, grid, statusBar)
+
 	// Return the whole thing wrapped in our app-level margins
 	return appStyle.Render(finalUI)
 }
