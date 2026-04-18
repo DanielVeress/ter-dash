@@ -7,6 +7,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v3/mem"
 )
 
 var (
@@ -33,8 +37,16 @@ var (
 
 type model struct{
 	time time.Time
+	cpu  float64
+	ram  float64
+	disk float64
 }
 type tickMsg time.Time
+type statsMsg struct {
+	cpu  float64
+	ram  float64
+	disk float64
+}
 
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
@@ -42,8 +54,27 @@ func tick() tea.Cmd {
 	})
 }
 
+func fetchStats() tea.Cmd {
+	return func() tea.Msg {
+		c, _ := cpu.Percent(0, false)
+		v, _ := mem.VirtualMemory()
+		d, _ := disk.Usage("/")
+
+		cpuVal := 0.0
+		if len(c) > 0 {
+			cpuVal = c[0]
+		}
+
+		return statsMsg{
+			cpu:  cpuVal,
+			ram:  v.UsedPercent,
+			disk: d.UsedPercent,
+		}
+	}
+}
+
 func (m model) Init() tea.Cmd {	
-	return tick()
+	return tea.Batch(tick(), fetchStats())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -53,9 +84,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "ctrl+c", "q":
 					return m, tea.Quit
 				}	
+		
 		case tickMsg:
 			m.time = time.Time(msg)
-			return m, tick()
+			return m, tea.Batch(tick(), fetchStats())
+		
+		case statsMsg:
+			m.cpu = msg.cpu
+			m.ram = msg.ram
+			m.disk = msg.disk
+			return m, nil
 	}
 	return m, nil
 }
@@ -81,8 +119,9 @@ func (m model) View() string {
 	weatherBox := boxStyle.Render(
 		titleStyle.Render("⛅ Weather (Uppsala)") + "\n\nLoading wttr.in...",
 	)
+    statsContent := fmt.Sprintf("\n\nCPU:  %5.1f%%\nRAM:  %5.1f%%\nDisk: %5.1f%%", m.cpu, m.ram, m.disk)
 	statsBox := boxStyle.Render(
-		titleStyle.Render("💻 System Stats") + "\n\nCPU: --%\nRAM: --%\nDisk: --%",
+		titleStyle.Render("💻 System Stats") + statsContent,
 	)
 	newsBox := boxStyle.Render(
 		titleStyle.Render("📰 News") + "\n\nFetching articles...",
