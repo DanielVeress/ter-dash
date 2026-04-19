@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"encoding/xml"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,19 +22,28 @@ import (
 )
 
 type Theme struct {
-	Border   lipgloss.Color
-	TitleFg  lipgloss.Color
-	TitleBg  lipgloss.Color
-	AsciiArt lipgloss.Color
-	Error    lipgloss.Color
+	Border     lipgloss.Color
+	TitleFg    lipgloss.Color
+	TitleBg    lipgloss.Color
+	AsciiArt   lipgloss.Color
+	Error      lipgloss.Color
+	StatBarBg  lipgloss.Color
+	StatBarFg  lipgloss.Color
 }
 
 var currentTheme = Theme{
-	Border:   lipgloss.Color("#874BFD"),
-	TitleFg:  lipgloss.Color("#FFFDF5"),
-	TitleBg:  lipgloss.Color("#25A065"),
-	AsciiArt: lipgloss.Color("#FF7CCB"),
-	Error:    lipgloss.Color("#FF5555"),
+    Border:    lipgloss.Color("#4C4F69"),
+    TitleFg:   lipgloss.Color("#EFF1F5"),
+    TitleBg:   lipgloss.Color("#1E66F5"),
+    AsciiArt:  lipgloss.Color("#8839EF"),
+    Error:     lipgloss.Color("#D20F39"),
+	StatBarBg: lipgloss.Color("#444444"),
+	StatBarFg: lipgloss.Color("#A6E3A1"),
+}
+
+type Config struct {
+	NotionAPIKey   string `json:"notion_api_key"`
+	NotionDatabase string `json:"notion_database_id"`
 }
 
 var (
@@ -76,6 +87,7 @@ type model struct {
 	cursor      int
 	lastTasks   time.Time
 	notionKey   string
+	notionDB    string
 	err         error
 }
 
@@ -249,14 +261,12 @@ func fetchNews() tea.Cmd {
 	}
 }
 
-func fetchTasks(apiKey string) tea.Cmd {
+func fetchTasks(apiKey string, dbID string) tea.Cmd {
 	return func() tea.Msg {
-		if apiKey == "" {
-			return taskErrMsg{err: fmt.Errorf("NOTION_API_KEY not set")}
-		}
-
-		dbID := "29a16b865dc280bbbbe2cb1691e93340"
-		url := fmt.Sprintf("https://api.notion.com/v1/databases/%s/query", dbID)
+        if apiKey == "" || dbID == "" {
+            return taskErrMsg{err: fmt.Errorf("Notion credentials not set")}
+        }
+        url := fmt.Sprintf("https://api.notion.com/v1/databases/%s/query", dbID)
 
 		payload := []byte(`{
 			"page_size": 10,
@@ -356,13 +366,28 @@ func markTaskDone(pageID, apiKey string, index int) tea.Cmd {
 	}
 }
 
+func drawProgressBar(percent float64, width int, color lipgloss.Color) string {
+    filledWidth := int((percent / 100.0) * float64(width))
+    if filledWidth > width { filledWidth = width }
+    emptyWidth := width - filledWidth
+
+    // Using block characters
+    filled := strings.Repeat("█", filledWidth)
+    empty := strings.Repeat("░", emptyWidth)
+
+    bar := lipgloss.NewStyle().Foreground(color).Render(filled) + 
+           lipgloss.NewStyle().Foreground(currentTheme.StatBarBg).Render(empty)
+    
+    return fmt.Sprintf("%5.1f%% %s", percent, bar)
+}
+
 func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		tick(),
 		fetchStats(),
 		fetchWeather(),
 		fetchNews(),
-		fetchTasks(m.notionKey),
+		fetchTasks(m.notionKey, m.notionDB),
 	)
 }
 
@@ -409,7 +434,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if time.Since(m.lastTasks) > 5*time.Minute {
 			m.lastTasks = time.Now()
-			cmds = append(cmds, fetchTasks(m.notionKey))
+			cmds = append(cmds, fetchTasks(m.notionKey, m.notionDB))
 		}
 
 		return m, tea.Batch(cmds...)
@@ -483,7 +508,10 @@ func (m model) View() string {
 		titleStyle.Render("⛅ Local Weather") + "\n\n" + m.weather,
 	)
 
-	statsContent := fmt.Sprintf("\n\nCPU:  %5.1f%%\nRAM:  %5.1f%%\nDisk: %5.1f%%", m.cpu, m.ram, m.disk)
+	statsContent := "\n"
+	statsContent += "\nCPU: " + drawProgressBar(m.cpu, innerWidth, currentTheme.StatBarFg)
+	statsContent += "\nRAM: " + drawProgressBar(m.ram, innerWidth, currentTheme.StatBarFg)
+	statsContent += "\nDisk: " + drawProgressBar(m.disk, innerWidth, currentTheme.StatBarFg)
 	statsBox := sized.Render(
 		titleStyle.Render("💻 System Stats") + statsContent,
 	)
@@ -539,12 +567,68 @@ func (m model) View() string {
 	return appStyle.Render(finalUI)
 }
 
+func loadOrSetupConfig() Config {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Println("✗ Error getting home directory:", err)
+		os.Exit(1)
+	}
+
+	configDir := filepath.Join(home, ".config", "ter_dash")
+	configPath := filepath.Join(configDir, "config.json")
+
+	var cfg Config
+
+	// Try to read existing config
+	data, err := os.ReadFile(configPath)
+	if err == nil {
+		if json.Unmarshal(data, &cfg) == nil && cfg.NotionAPIKey != "" && cfg.NotionDatabase != "" {
+			return cfg // Config exists and is valid
+		}
+	}
+
+	// If we reach here, we need to run the initial setup
+	fmt.Println("✨ First time setup: Please enter your Notion credentials.")
+	fmt.Println("These will be saved securely to:", configPath)
+	fmt.Println(strings.Repeat("-", 50))
+
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Print("Notion API Key: ")
+	apiKey, _ := reader.ReadString('\n')
+	cfg.NotionAPIKey = strings.TrimSpace(apiKey)
+
+	fmt.Print("Notion Database ID: ")
+	dbID, _ := reader.ReadString('\n')
+	cfg.NotionDatabase = strings.TrimSpace(dbID)
+
+	// Create directory and save file
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		fmt.Println("✗ Error creating config directory:", err)
+		os.Exit(1)
+	}
+
+	out, _ := json.MarshalIndent(cfg, "", "  ")
+	// Using 0600 permissions so only your user account can read the secrets
+	if err := os.WriteFile(configPath, out, 0600); err != nil {
+		fmt.Println("✗ Error saving config file:", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("✅ Configuration saved! Starting dashboard...")
+	time.Sleep(1 * time.Second) // Brief pause so the user sees the success message
+
+	return cfg
+}
+
 func main() {
+	cfg := loadOrSetupConfig()
 	initialModel := model{
 		time:      time.Now(),
 		weather:   "Fetching weather...",
-		notionKey: os.Getenv("NOTION_API_KEY"),
-	}
+		notionKey: cfg.NotionAPIKey,
+        notionDB:  cfg.NotionDatabase,
+    }
 
 	p := tea.NewProgram(initialModel, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
