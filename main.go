@@ -2,12 +2,8 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
-	"encoding/xml"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,9 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/disk"
-	"github.com/shirou/gopsutil/v3/mem"
+	"terminal-dashboard/components"
 )
 
 type Theme struct {
@@ -83,7 +77,7 @@ type model struct {
 	lastWeather time.Time
 	news        []string
 	lastNews    time.Time
-	tasks       []notionTask
+	tasks       []components.NotionTask
 	cursor      int
 	lastTasks   time.Time
 	notionKey   string
@@ -92,278 +86,11 @@ type model struct {
 }
 
 type tickMsg time.Time
-type statsMsg struct {
-	cpu  float64
-	ram  float64
-	disk float64
-}
-type weatherMsg string
-type errMsg error
-type NewsItem struct {
-	Title string `xml:"title"`
-}
-type Rss struct {
-	Items []NewsItem `xml:"channel>item"`
-}
-type newsMsg []string
-
-type notionTask struct {
-	id    string
-	label string
-}
-
-type NotionResponse struct {
-	Results []NotionPage `json:"results"`
-}
-type NotionProperty struct {
-	Type  string `json:"type"`
-	Title []struct {
-		PlainText string `json:"plain_text"`
-	} `json:"title"`
-	Date *struct {
-		Start string `json:"start"`
-	} `json:"date"`
-}
-type NotionPage struct {
-	ID         string                     `json:"id"`
-	Properties map[string]NotionProperty  `json:"properties"`
-}
-type tasksMsg []notionTask
-type taskErrMsg struct{ err error }
-type taskDoneMsg struct{ index int }
 
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
-}
-
-func fetchStats() tea.Cmd {
-	return func() tea.Msg {
-		c, _ := cpu.Percent(0, false)
-		v, _ := mem.VirtualMemory()
-		d, _ := disk.Usage("/")
-
-		cpuVal := 0.0
-		if len(c) > 0 {
-			cpuVal = c[0]
-		}
-
-		return statsMsg{
-			cpu:  cpuVal,
-			ram:  v.UsedPercent,
-			disk: d.UsedPercent,
-		}
-	}
-}
-
-func formatWeatherLocation(raw string) string {
-	parts := strings.SplitN(raw, ":", 2)
-	if len(parts) != 2 {
-		return raw
-	}
-	locs := strings.Split(parts[0], ",")
-
-	if len(locs) >= 3 {
-		city := strings.TrimSpace(locs[0])
-		country := strings.TrimSpace(locs[len(locs)-1])
-
-		if len(city) > 0 {
-			city = strings.ToUpper(string(city[0])) + city[1:]
-		}
-		country = strings.ToUpper(country)
-
-		return fmt.Sprintf("%s, %s:%s", city, country, parts[1])
-	}
-
-	return raw
-}
-
-func getSeason(t time.Time) string {
-	if t.IsZero() {
-		return "..."
-	}
-
-	switch t.Month() {
-	case time.March, time.April, time.May:
-		return "🌸 Spring"
-	case time.June, time.July, time.August:
-		return "☀️ Summer"
-	case time.September, time.October, time.November:
-		return "🍂 Autumn"
-	case time.December, time.January, time.February:
-		return "❄️ Winter"
-	default:
-		return "🌍 Unknown"
-	}
-}
-
-func fetchWeather() tea.Cmd {
-	return func() tea.Msg {
-		client := &http.Client{Timeout: 10 * time.Second}
-
-		res, err := client.Get("https://wttr.in/?format=3")
-		if err != nil {
-			return errMsg(err)
-		}
-		defer res.Body.Close()
-
-		body, err := io.ReadAll(res.Body)
-		if err != nil {
-			return errMsg(err)
-		}
-		weatherStr := strings.TrimSpace(string(body))
-
-		if strings.Contains(weatherStr, "HTML") || weatherStr == "" {
-			return errMsg(fmt.Errorf("API unavailable"))
-		}
-
-		weatherStr = formatWeatherLocation(weatherStr)
-
-		return weatherMsg(weatherStr)
-	}
-}
-
-func fetchNews() tea.Cmd {
-	return func() tea.Msg {
-		sources := map[string]string{
-			"NPR":      "https://feeds.npr.org/1001/rss.xml",
-			"Guardian": "https://www.theguardian.com/world/rss",
-			"Telex":    "https://telex.hu/rss",
-			"HVG":      "https://hvg.hu/rss",
-		}
-
-		var allHeadlines []string
-		client := &http.Client{Timeout: 5 * time.Second}
-
-		for name, url := range sources {
-			resp, err := client.Get(url)
-			if err != nil {
-				continue
-			}
-			defer resp.Body.Close()
-
-			var rss Rss
-			if err := xml.NewDecoder(resp.Body).Decode(&rss); err != nil {
-				continue
-			}
-
-			count := 0
-			for _, item := range rss.Items {
-				if count >= 2 {
-					break
-				}
-				allHeadlines = append(allHeadlines, fmt.Sprintf("[%s] %s", name, item.Title))
-				count++
-			}
-		}
-		return newsMsg(allHeadlines)
-	}
-}
-
-func fetchTasks(apiKey string, dbID string) tea.Cmd {
-	return func() tea.Msg {
-        if apiKey == "" || dbID == "" {
-            return taskErrMsg{err: fmt.Errorf("Notion credentials not set")}
-        }
-        url := fmt.Sprintf("https://api.notion.com/v1/databases/%s/query", dbID)
-
-		payload := []byte(`{
-			"page_size": 10,
-			"filter": {
-				"property": "Status",
-				"status": {
-					"does_not_equal": "Done"
-				}
-			},
-			"sorts": [
-				{
-					"property": "Due Date",
-					"direction": "ascending"
-				}
-			]
-		}`)
-
-		req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
-		if err != nil {
-			return taskErrMsg{err: fmt.Errorf("error building request: %w", err)}
-		}
-
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-		req.Header.Set("Notion-Version", "2022-06-28")
-		req.Header.Set("Content-Type", "application/json")
-
-		client := &http.Client{Timeout: 5 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			return taskErrMsg{err: fmt.Errorf("error reaching Notion: %w", err)}
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			return taskErrMsg{err: fmt.Errorf("Notion API error %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))}
-		}
-
-		var notionResp NotionResponse
-		if err := json.NewDecoder(resp.Body).Decode(&notionResp); err != nil {
-			return taskErrMsg{err: fmt.Errorf("error parsing Notion response: %w", err)}
-		}
-
-		var tasks []notionTask
-		for _, page := range notionResp.Results {
-			title := "Untitled"
-			for _, prop := range page.Properties {
-				if prop.Type == "title" && len(prop.Title) > 0 {
-					title = prop.Title[0].PlainText
-					break
-				}
-			}
-
-			dateStr := ""
-			if dueProp, ok := page.Properties["Due Date"]; ok && dueProp.Date != nil {
-				dateStr = fmt.Sprintf(" (Due: %s)", dueProp.Date.Start)
-			}
-
-			tasks = append(tasks, notionTask{id: page.ID, label: title + dateStr})
-		}
-
-		if len(tasks) == 0 {
-			tasks = append(tasks, notionTask{label: "No upcoming tasks!"})
-		}
-
-		return tasksMsg(tasks)
-	}
-}
-
-func markTaskDone(pageID, apiKey string, index int) tea.Cmd {
-	return func() tea.Msg {
-		payload := []byte(`{"properties":{"Status":{"status":{"name":"Done"}}}}`)
-		url := fmt.Sprintf("https://api.notion.com/v1/pages/%s", pageID)
-
-		req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(payload))
-		if err != nil {
-			return taskErrMsg{err: fmt.Errorf("error building request: %w", err)}
-		}
-
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-		req.Header.Set("Notion-Version", "2022-06-28")
-		req.Header.Set("Content-Type", "application/json")
-
-		client := &http.Client{Timeout: 5 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			return taskErrMsg{err: fmt.Errorf("error reaching Notion: %w", err)}
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			return taskErrMsg{err: fmt.Errorf("Notion API error %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))}
-		}
-
-		return taskDoneMsg{index: index}
-	}
 }
 
 func drawProgressBar(percent float64, width int, color lipgloss.Color) string {
@@ -384,10 +111,10 @@ func drawProgressBar(percent float64, width int, color lipgloss.Color) string {
 func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		tick(),
-		fetchStats(),
-		fetchWeather(),
-		fetchNews(),
-		fetchTasks(m.notionKey, m.notionDB),
+		components.FetchStats(),
+		components.FetchWeather(),
+		components.FetchNews(),
+		components.FetchTasks(m.notionKey, m.notionDB),
 	)
 }
 
@@ -406,8 +133,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor--
 			}
 		case "enter":
-			if len(m.tasks) > 0 && m.tasks[m.cursor].id != "" {
-				return m, markTaskDone(m.tasks[m.cursor].id, m.notionKey, m.cursor)
+			if len(m.tasks) > 0 && m.tasks[m.cursor].ID != "" {
+				return m, components.MarkTaskDone(m.tasks[m.cursor].ID, m.notionKey, m.cursor)
 			}
 		}
 
@@ -420,64 +147,64 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.time = time.Time(msg)
 
 		var cmds []tea.Cmd
-		cmds = append(cmds, tick(), fetchStats())
+		cmds = append(cmds, tick(), components.FetchStats())
 
 		if time.Since(m.lastNews) > time.Hour {
 			m.lastNews = time.Now()
-			cmds = append(cmds, fetchNews())
+			cmds = append(cmds, components.FetchNews())
 		}
 
 		if time.Since(m.lastWeather) > 2*time.Hour {
 			m.lastWeather = time.Now()
-			cmds = append(cmds, fetchWeather())
+			cmds = append(cmds, components.FetchWeather())
 		}
 
 		if time.Since(m.lastTasks) > 5*time.Minute {
 			m.lastTasks = time.Now()
-			cmds = append(cmds, fetchTasks(m.notionKey, m.notionDB))
+			cmds = append(cmds, components.FetchTasks(m.notionKey, m.notionDB))
 		}
 
 		return m, tea.Batch(cmds...)
 
-	case statsMsg:
-		m.cpu = msg.cpu
-		m.ram = msg.ram
-		m.disk = msg.disk
+	case components.StatsMsg:
+		m.cpu = msg.Cpu
+		m.ram = msg.Ram
+		m.disk = msg.Disk
 		return m, nil
 
-	case weatherMsg:
+	case components.WeatherMsg:
 		m.weather = string(msg)
 		return m, nil
 
-	case newsMsg:
+	case components.NewsMsg:
 		m.news = msg
 		m.lastNews = time.Now()
 		return m, nil
 
-	case tasksMsg:
+	case components.TasksMsg:
 		m.tasks = msg
 		m.cursor = 0
 		m.err = nil
 		m.lastTasks = time.Now()
 		return m, nil
 
-	case taskDoneMsg:
-		if msg.index >= 0 && msg.index < len(m.tasks) {
-			m.tasks = append(m.tasks[:msg.index], m.tasks[msg.index+1:]...)
+	case components.TaskDoneMsg:
+		if msg.Index >= 0 && msg.Index < len(m.tasks) {
+			m.tasks = append(m.tasks[:msg.Index], m.tasks[msg.Index+1:]...)
 			if m.cursor >= len(m.tasks) && m.cursor > 0 {
 				m.cursor--
 			}
 			if len(m.tasks) == 0 {
-				m.tasks = []notionTask{{label: "No upcoming tasks!"}}
+				m.tasks = []components.NotionTask{{Label: "No upcoming tasks!"}}
 			}
 		}
 		return m, nil
 
-	case taskErrMsg:
-		m.err = msg.err
+	case components.TaskErrMsg:
+		m.err = msg.Err
 		return m, nil
 
-	case errMsg:
+	case components.WeatherErrMsg:
 		m.weather = "Weather unavailable right now"
 		return m, nil
 	}
@@ -493,7 +220,7 @@ func (m model) View() string {
       _|      _|_|_|  _|        _|_|_|      _|_|_|  _|_|_|      _|    _|`
 
 	currentTime := m.time.Format("Monday, 02 Jan 2006 | 15:04:05")
-	season := getSeason(m.time)
+	season := components.GetSeason(m.time)
 
 	headerInfo := fmt.Sprintf("%s\n%s\n\nPress 'q' to quit | j/k to navigate tasks | Enter to mark done", currentTime, season)
 
@@ -537,10 +264,10 @@ func (m model) View() string {
 	} else {
 		for i, task := range m.tasks {
 			var rendered string
-			if i == m.cursor && task.id != "" {
-				rendered = selectedTaskStyle.Width(innerWidth).Render("▶ " + task.label)
+			if i == m.cursor && task.ID != "" {
+				rendered = selectedTaskStyle.Width(innerWidth).Render("▶ " + task.Label)
 			} else {
-				rendered = lipgloss.NewStyle().Width(innerWidth).Render("☐ " + task.label)
+				rendered = lipgloss.NewStyle().Width(innerWidth).Render("☐ " + task.Label)
 			}
 			tasksContent += "\n" + rendered
 		}
