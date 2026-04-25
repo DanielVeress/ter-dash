@@ -78,7 +78,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if len(m.tasks) > 0 && m.tasks[m.cursor].ID != "" {
-				return m, components.MarkTaskDone(m.tasks[m.cursor].ID, m.notionKey, m.cursor)
+				m.tasks[m.cursor].IsPending = true
+				return m, components.MarkTaskDone(m.tasks[m.cursor].ID, m.notionKey)
 			}
 		}
 
@@ -152,16 +153,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case components.TaskDoneMsg:
-		if msg.Index >= 0 && msg.Index < len(m.tasks) {
-			m.tasks = append(m.tasks[:msg.Index], m.tasks[msg.Index+1:]...)
-			if m.cursor >= len(m.tasks) && m.cursor > 0 {
-				m.cursor--
+		for i := range m.tasks {
+			if m.tasks[i].ID == msg.ID {
+				m.tasks[i].IsPending = false
+				m.tasks[i].IsJustFinished = true
+				break
 			}
-			if len(m.tasks) == 0 {
-				m.tasks = []components.NotionTask{{Label: "No upcoming tasks!"}}
+		}
+		return m, func() tea.Msg {
+			time.Sleep(800 * time.Millisecond)
+			return components.ClearFlashMsg{ID: msg.ID}
+		}
+
+	case components.ClearFlashMsg:
+		for i := range m.tasks {
+			if m.tasks[i].ID == msg.ID {
+				m.tasks = append(m.tasks[:i], m.tasks[i+1:]...)
+				if m.cursor >= len(m.tasks) && m.cursor > 0 {
+					m.cursor--
+				}
+				if len(m.tasks) == 0 {
+					m.tasks = []components.NotionTask{{Label: "No upcoming tasks!"}}
+				}
+				break
 			}
 		}
 		return m, nil
+    
 
 	case components.TaskErrMsg:
 		m.err = msg.Err

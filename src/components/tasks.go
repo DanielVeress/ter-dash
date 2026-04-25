@@ -17,6 +17,9 @@ import (
 type NotionTask struct {
 	ID    string
 	Label string
+
+	IsPending      bool 
+    IsJustFinished bool 
 }
 
 type NotionResponse struct {
@@ -37,7 +40,8 @@ type NotionPage struct {
 }
 type TasksMsg []NotionTask
 type TaskErrMsg struct{ Err error }
-type TaskDoneMsg struct{ Index int }
+type TaskDoneMsg struct{ ID string }
+type ClearFlashMsg struct{ ID string }
 
 
 func FetchTasks(apiKey string, dbID string) tea.Cmd {
@@ -127,7 +131,8 @@ func FetchTasks(apiKey string, dbID string) tea.Cmd {
 	}
 }
 
-func MarkTaskDone(pageID, apiKey string, index int) tea.Cmd {
+
+func MarkTaskDone(pageID, apiKey string) tea.Cmd {
 	return func() tea.Msg {
 		payload := []byte(`{"properties":{"Status":{"status":{"name":"Done"}}}}`)
 		url := fmt.Sprintf("https://api.notion.com/v1/pages/%s", pageID)
@@ -153,24 +158,38 @@ func MarkTaskDone(pageID, apiKey string, index int) tea.Cmd {
 			return TaskErrMsg{Err: fmt.Errorf("Notion API error %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))}
 		}
 
-		return TaskDoneMsg{Index: index}
+		return TaskDoneMsg{ID: pageID}
 	}
 }
 
 func RenderTasks(sized lipgloss.Style, tasks []NotionTask, cursor int, innerWidth int) string {
+	pendingStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")).
+		Bold(true)
+
+    successStyle := lipgloss.NewStyle().
+        Foreground(lipgloss.Color("42")). // Bright green
+        Bold(true)
+
 	tasksContent := ""
 	if len(tasks) == 0 {
 		tasksContent = "\n\nLoading tasks..."
 	} else {
 		for i, task := range tasks {
-			var rendered string
-			if i == cursor && task.ID != "" {
-				rendered = theme.SelectedTaskStyle.Width(innerWidth).Render("▶ " + task.Label)
-			} else {
-				rendered = lipgloss.NewStyle().Width(innerWidth).Render("☐ " + task.Label)
-			}
-			tasksContent += "\n" + rendered
-		}
+            var rendered string
+            
+            if task.IsJustFinished {
+                rendered = successStyle.Width(innerWidth).Render("✓ " + task.Label)
+            } else if task.IsPending {
+                rendered = pendingStyle.Width(innerWidth).Render("⟳ " + task.Label)
+            } else if i == cursor && task.ID != "" {
+                rendered = theme.SelectedTaskStyle.Width(innerWidth).Render("▶ " + task.Label)
+            } else {
+                rendered = lipgloss.NewStyle().Width(innerWidth).Render("☐ " + task.Label)
+            }
+            
+            tasksContent += "\n" + rendered
+        }
 	}
 
 	tasksBox := sized.Render(
