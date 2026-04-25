@@ -41,6 +41,9 @@ type model struct {
 	lastTasks   time.Time
 	notionKey   string
 	notionDB    string
+	pomodoroActive bool
+	pomodoroStart  time.Time
+	pomodoroCount  int
 	err         error
 }
 
@@ -76,6 +79,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor > 0 {
 				m.cursor--
 			}
+		case "p":
+			if m.pomodoroActive {
+				m.pomodoroActive = false
+			} else {
+				m.pomodoroActive = true
+				m.pomodoroStart = time.Now()
+			}
 		case "enter":
 			if len(m.tasks) > 0 && m.tasks[m.cursor].ID != "" {
 				m.tasks[m.cursor].IsPending = true
@@ -107,6 +117,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if time.Since(m.lastTasks) > 5*time.Minute {
 			m.lastTasks = time.Now()
 			cmds = append(cmds, components.FetchTasks(m.notionKey, m.notionDB))
+		}
+
+		// Pomodoro
+		elapsed := time.Since(m.pomodoroStart)
+		if m.pomodoroActive && elapsed > 25*time.Minute {
+			m.pomodoroActive = false
+			m.pomodoroCount++
+			components.SavePomodoroCount(m.pomodoroCount)
 		}
 
 		return m, tea.Batch(cmds...)
@@ -200,11 +218,28 @@ func (m model) View() string {
 	innerWidth = max(innerWidth, 10)
 	sized := theme.BoxStyle.Width(colWidth)
 
-	statsBox := components.RenderStats(sized, m.cpu, m.ram, m.disk, innerWidth)
+	// Split the left column into stats + pomodoro side by side
+	halfCol := (colWidth - 4) / 2
+	halfInner := halfCol - 6
+	halfInner = max(halfInner, 6)
+	halfSized := theme.BoxStyle.Width(halfCol)
+
+	var remaining time.Duration
+	var elapsed time.Duration
+	if m.pomodoroActive {
+		elapsed = time.Since(m.pomodoroStart)
+		remaining = max(25*time.Minute-elapsed, 0)
+	} else {
+		remaining = 25 * time.Minute
+	}
+
+	statsBox := components.RenderStats(halfSized, m.cpu, m.ram, m.disk, halfInner)
+	pomodoroBox := components.RenderPomodoro(halfSized, m.pomodoroActive, remaining, m.pomodoroCount, elapsed, halfInner)
 	newsBox := components.RenderNews(sized, m.news, innerWidth)
 	tasksBox := components.RenderTasks(sized, m.tasks, m.cursor, innerWidth)
 
-	leftColumn := lipgloss.JoinVertical(lipgloss.Left, statsBox, newsBox)
+	topRow := lipgloss.JoinHorizontal(lipgloss.Top, statsBox, pomodoroBox)
+	leftColumn := lipgloss.JoinVertical(lipgloss.Left, topRow, newsBox)
 	grid := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, tasksBox)
 
 	statusBar := ""
