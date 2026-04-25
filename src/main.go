@@ -41,9 +41,11 @@ type model struct {
 	lastTasks   time.Time
 	notionKey   string
 	notionDB    string
-	pomodoroActive bool
-	pomodoroStart  time.Time
-	pomodoroCount  int
+	pomodoroActive              bool
+	pomodoroPaused              bool
+	pomodoroStart               time.Time
+	pomodoroElapsedBeforePause  time.Duration
+	pomodoroCount               int
 	err         error
 }
 
@@ -80,12 +82,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor--
 			}
 		case "p":
-			if m.pomodoroActive {
-				m.pomodoroActive = false
-			} else {
-				m.pomodoroActive = true
+			if m.pomodoroPaused {
 				m.pomodoroStart = time.Now()
+				m.pomodoroPaused = false
+				m.pomodoroActive = true
+			} else if m.pomodoroActive {
+				m.pomodoroElapsedBeforePause = time.Since(m.pomodoroStart)
+				m.pomodoroActive = false
+				m.pomodoroPaused = true
+			} else {
+				m.pomodoroElapsedBeforePause = 0
+				m.pomodoroStart = time.Now()
+				m.pomodoroActive = true
 			}
+		case "s":
+			m.pomodoroActive = false
+			m.pomodoroPaused = false
+			m.pomodoroElapsedBeforePause = 0
 		case "enter":
 			if len(m.tasks) > 0 && m.tasks[m.cursor].ID != "" {
 				m.tasks[m.cursor].IsPending = true
@@ -120,9 +133,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Pomodoro
-		elapsed := time.Since(m.pomodoroStart)
+		elapsed := m.pomodoroElapsedBeforePause
+		if m.pomodoroActive {
+			elapsed += time.Since(m.pomodoroStart)
+		}
 		if m.pomodoroActive && elapsed > 25*time.Minute {
 			m.pomodoroActive = false
+			m.pomodoroPaused = false
+			m.pomodoroElapsedBeforePause = 0
 			m.pomodoroCount++
 			components.SavePomodoroCount(m.pomodoroCount)
 		}
@@ -236,7 +254,7 @@ func computeDims(totalWidth int) layoutDims {
 
 func renderLeftColumn(m model, dims layoutDims, elapsed, remaining time.Duration) string {
 	statsBox := components.RenderStats(dims.halfSized, m.cpu, m.ram, m.disk, dims.halfInner)
-	pomodoroBox := components.RenderPomodoro(dims.halfSized, m.pomodoroActive, remaining, m.pomodoroCount, elapsed, dims.halfInner)
+	pomodoroBox := components.RenderPomodoro(dims.halfSized, m.pomodoroActive, m.pomodoroPaused, remaining, m.pomodoroCount, elapsed, dims.halfInner)
 	newsBox := components.RenderNews(dims.sized, m.news, dims.innerWidth)
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, statsBox, pomodoroBox)
 	return lipgloss.JoinVertical(lipgloss.Left, topRow, newsBox)
@@ -264,7 +282,10 @@ func (m model) View() string {
 
 	var elapsed, remaining time.Duration
 	if m.pomodoroActive {
-		elapsed = time.Since(m.pomodoroStart)
+		elapsed = m.pomodoroElapsedBeforePause + time.Since(m.pomodoroStart)
+		remaining = max(25*time.Minute-elapsed, 0)
+	} else if m.pomodoroPaused {
+		elapsed = m.pomodoroElapsedBeforePause
 		remaining = max(25*time.Minute-elapsed, 0)
 	} else {
 		remaining = 25 * time.Minute

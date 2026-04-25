@@ -44,7 +44,7 @@ func pomodoroSessionDots(count int, active bool) string {
 	return result
 }
 
-func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, remaining time.Duration, count int, elapsed time.Duration, width int) string {
+func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, pomodoroPaused bool, remaining time.Duration, count int, elapsed time.Duration, width int) string {
 	title := theme.TitleStyle.Render("🍅 Pomodoro")
 
 	var statusStyle lipgloss.Style
@@ -52,6 +52,9 @@ func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, remaining time.Dura
 	if pomodoroActive {
 		statusStyle = lipgloss.NewStyle().Foreground(theme.GlobalTheme.Active).Bold(true)
 		statusText = "● RUNNING"
+	} else if pomodoroPaused {
+		statusStyle = lipgloss.NewStyle().Foreground(theme.GlobalTheme.Accent1).Bold(true)
+		statusText = "⏸ PAUSED"
 	} else {
 		statusStyle = lipgloss.NewStyle().Foreground(theme.GlobalTheme.Border)
 		statusText = "◎  READY"
@@ -60,12 +63,14 @@ func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, remaining time.Dura
 	timerColor := theme.GlobalTheme.Border
 	if pomodoroActive {
 		timerColor = theme.GlobalTheme.Active
+	} else if pomodoroPaused {
+		timerColor = theme.GlobalTheme.Accent1
 	}
 	timerStr := fmt.Sprintf("%02d:%02d", int(remaining.Minutes()), int(remaining.Seconds())%60)
 	timer := lipgloss.NewStyle().Foreground(timerColor).Bold(true).Render(timerStr)
 
 	progress := 0.0
-	if pomodoroActive {
+	if pomodoroActive || pomodoroPaused {
 		progress = elapsed.Seconds() / (25 * 60)
 		if progress > 1 {
 			progress = 1
