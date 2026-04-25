@@ -46,6 +46,7 @@ type model struct {
 	pomodoroStart               time.Time
 	pomodoroElapsedBeforePause  time.Duration
 	pomodoroCount               int
+	showHelp    bool
 	err         error
 }
 
@@ -73,6 +74,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+		case "?":
+			m.showHelp = !m.showHelp
+			return m, nil
 		case "j", "down":
 			if m.cursor < len(m.tasks)-1 {
 				m.cursor++
@@ -277,6 +281,9 @@ func renderStatusBar(m model, width int) string {
 func (m model) View() string {
 	if m.width == 0 {
 		return ""
+	}
+	if m.showHelp {
+		return components.RenderHelp(m.width, m.height)
 	}
 	dims := computeDims(m.width)
 
