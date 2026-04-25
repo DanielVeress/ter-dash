@@ -126,10 +126,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case components.TasksMsg:
+		var activeTaskID string
+		hasActiveTask := false
+
+		if len(m.tasks) > 0 && m.cursor >= 0 && m.cursor < len(m.tasks) {
+			activeTaskID = m.tasks[m.cursor].ID
+			hasActiveTask = true
+		}
+		
 		m.tasks = msg
-		m.cursor = 0
 		m.err = nil
 		m.lastTasks = time.Now()
+		m.cursor = 0 // default
+		
+		// Search for the active task's position and set the cursor to it
+		if hasActiveTask {
+			for i, task := range m.tasks {
+				if task.ID == activeTaskID {
+					m.cursor = i
+					break
+				}
+			}
+		}
+
 		return m, nil
 
 	case components.TaskDoneMsg:
