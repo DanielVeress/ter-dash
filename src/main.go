@@ -210,22 +210,56 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) View() string {
-	header := components.RenderHeader(m.time, m.weather)
+type layoutDims struct {
+	colWidth   int
+	innerWidth int
+	halfCol    int
+	halfInner  int
+	sized      lipgloss.Style
+	halfSized  lipgloss.Style
+}
 
-	colWidth := (m.width - 6) / 2
-	innerWidth := colWidth - 6
-	innerWidth = max(innerWidth, 10)
-	sized := theme.BoxStyle.Width(colWidth)
-
-	// Split the left column into stats + pomodoro side by side
+func computeDims(totalWidth int) layoutDims {
+	colWidth := (totalWidth - 6) / 2
+	innerWidth := max(colWidth-6, 10)
 	halfCol := (colWidth - 4) / 2
-	halfInner := halfCol - 6
-	halfInner = max(halfInner, 6)
-	halfSized := theme.BoxStyle.Width(halfCol)
+	halfInner := max(halfCol-6, 6)
+	return layoutDims{
+		colWidth:   colWidth,
+		innerWidth: innerWidth,
+		halfCol:    halfCol,
+		halfInner:  halfInner,
+		sized:      theme.BoxStyle.Width(colWidth),
+		halfSized:  theme.BoxStyle.Width(halfCol),
+	}
+}
 
-	var remaining time.Duration
-	var elapsed time.Duration
+func renderLeftColumn(m model, dims layoutDims, elapsed, remaining time.Duration) string {
+	statsBox := components.RenderStats(dims.halfSized, m.cpu, m.ram, m.disk, dims.halfInner)
+	pomodoroBox := components.RenderPomodoro(dims.halfSized, m.pomodoroActive, remaining, m.pomodoroCount, elapsed, dims.halfInner)
+	newsBox := components.RenderNews(dims.sized, m.news, dims.innerWidth)
+	topRow := lipgloss.JoinHorizontal(lipgloss.Top, statsBox, pomodoroBox)
+	return lipgloss.JoinVertical(lipgloss.Left, topRow, newsBox)
+}
+
+func renderRightColumn(m model, dims layoutDims) string {
+	return components.RenderTasks(dims.sized, m.tasks, m.cursor, dims.innerWidth)
+}
+
+func renderStatusBar(m model, width int) string {
+	if m.err == nil {
+		return ""
+	}
+	return lipgloss.NewStyle().
+		Foreground(GlobalTheme.Error).
+		Width(width).
+		Render("  ✗ " + m.err.Error())
+}
+
+func (m model) View() string {
+	dims := computeDims(m.width)
+
+	var elapsed, remaining time.Duration
 	if m.pomodoroActive {
 		elapsed = time.Since(m.pomodoroStart)
 		remaining = max(25*time.Minute-elapsed, 0)
@@ -233,26 +267,16 @@ func (m model) View() string {
 		remaining = 25 * time.Minute
 	}
 
-	statsBox := components.RenderStats(halfSized, m.cpu, m.ram, m.disk, halfInner)
-	pomodoroBox := components.RenderPomodoro(halfSized, m.pomodoroActive, remaining, m.pomodoroCount, elapsed, halfInner)
-	newsBox := components.RenderNews(sized, m.news, innerWidth)
-	tasksBox := components.RenderTasks(sized, m.tasks, m.cursor, innerWidth)
+	header := components.RenderHeader(m.time, m.weather)
+	grid := lipgloss.JoinHorizontal(lipgloss.Top,
+		renderLeftColumn(m, dims, elapsed, remaining),
+		renderRightColumn(m, dims),
+	)
+	statusBar := renderStatusBar(m, m.width)
 
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top, statsBox, pomodoroBox)
-	leftColumn := lipgloss.JoinVertical(lipgloss.Left, topRow, newsBox)
-	grid := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, tasksBox)
-
-	statusBar := ""
-	if m.err != nil {
-		statusBar = lipgloss.NewStyle().
-			Foreground(GlobalTheme.Error).
-			Width(m.width).
-			Render("  ✗ " + m.err.Error())
-	}
-
-	finalUI := lipgloss.JoinVertical(lipgloss.Left, header, grid, statusBar)
-
-	return theme.AppStyle.Render(finalUI)
+	return theme.AppStyle.Render(
+		lipgloss.JoinVertical(lipgloss.Left, header, grid, statusBar),
+	)
 }
 
 func loadOrSetupConfig() Config {
