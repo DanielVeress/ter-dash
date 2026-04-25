@@ -19,17 +19,19 @@ type StatsMsg struct {
 }
 
 func drawProgressBar(percent float64, width int, color lipgloss.Color) string {
-    filledWidth := int((percent / 100.0) * float64(width))
-    if filledWidth > width { filledWidth = width }
-    emptyWidth := width - filledWidth
+	filledWidth := int((percent / 100.0) * float64(width))
+	if filledWidth > width {
+		filledWidth = width
+	}
+	emptyWidth := width - filledWidth
 
-    filled := strings.Repeat("█", filledWidth)
-    empty := strings.Repeat("░", emptyWidth)
+	filled := strings.Repeat("█", filledWidth)
+	empty := strings.Repeat("░", emptyWidth)
 
-    bar := lipgloss.NewStyle().Foreground(color).Render(filled) + 
-           lipgloss.NewStyle().Foreground(theme.GlobalTheme.StatBarBg).Render(empty)
-    
-    return fmt.Sprintf("%5.1f%% %s", percent, bar)
+	bar := lipgloss.NewStyle().Foreground(color).Render(filled) +
+		lipgloss.NewStyle().Foreground(theme.GlobalTheme.StatBarBg).Render(empty)
+
+	return fmt.Sprintf("%5.1f%% %s", percent, bar)
 }
 
 func FetchStats() tea.Cmd {
@@ -52,10 +54,12 @@ func FetchStats() tea.Cmd {
 }
 
 func RenderStats(sized lipgloss.Style, cpu float64, ram float64, disk float64, innerWidth int) string {
+	labelStyle := lipgloss.NewStyle().Foreground(theme.GlobalTheme.TextMuted)
+
 	statsContent := "\n"
-	statsContent += "\nCPU: " + drawProgressBar(cpu, innerWidth, theme.GlobalTheme.StatBarFg)
-	statsContent += "\nRAM: " + drawProgressBar(ram, innerWidth, theme.GlobalTheme.StatBarFg)
-	statsContent += "\nDisk: " + drawProgressBar(disk, innerWidth, theme.GlobalTheme.StatBarFg)
+	statsContent += "\n" + labelStyle.Render("CPU:  ") + drawProgressBar(cpu, innerWidth, theme.GlobalTheme.StatBarFg)
+	statsContent += "\n" + labelStyle.Render("RAM:  ") + drawProgressBar(ram, innerWidth, theme.GlobalTheme.StatBarFg)
+	statsContent += "\n" + labelStyle.Render("Disk: ") + drawProgressBar(disk, innerWidth, theme.GlobalTheme.StatBarFg)
 	statsBox := sized.Render(
 		theme.TitleStyle.Render("💻 System Stats") + statsContent,
 	)

@@ -222,7 +222,7 @@ type layoutDims struct {
 func computeDims(totalWidth int) layoutDims {
 	colWidth := (totalWidth - 6) / 2
 	innerWidth := max(colWidth-6, 10)
-	halfCol := (colWidth - 4) / 2
+	halfCol := (colWidth - 2) / 2
 	halfInner := max(halfCol-6, 6)
 	return layoutDims{
 		colWidth:   colWidth,
@@ -230,7 +230,7 @@ func computeDims(totalWidth int) layoutDims {
 		halfCol:    halfCol,
 		halfInner:  halfInner,
 		sized:      theme.BoxStyle.Width(colWidth),
-		halfSized:  theme.BoxStyle.Width(halfCol),
+		halfSized:  theme.BoxStyle.Width(halfCol).Height(12),
 	}
 }
 
@@ -257,6 +257,9 @@ func renderStatusBar(m model, width int) string {
 }
 
 func (m model) View() string {
+	if m.width == 0 {
+		return ""
+	}
 	dims := computeDims(m.width)
 
 	var elapsed, remaining time.Duration
@@ -272,11 +275,15 @@ func (m model) View() string {
 		renderLeftColumn(m, dims, elapsed, remaining),
 		renderRightColumn(m, dims),
 	)
-	statusBar := renderStatusBar(m, m.width)
 
-	return theme.AppStyle.Render(
-		lipgloss.JoinVertical(lipgloss.Left, header, grid, statusBar),
-	)
+	rows := []string{header, grid}
+	if m.err != nil {
+		rows = append(rows, renderStatusBar(m, m.width))
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Center, rows...)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Top,
+		lipgloss.NewStyle().MarginTop(1).Render(content))
 }
 
 func loadOrSetupConfig() Config {

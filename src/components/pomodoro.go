@@ -10,19 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func SavePomodoroCount(count int) {
-	//home, err := os.UserHomeDir()
-	//if err != nil {
-	//	return
-	//}
-	//csvPath := filepath.Join(home, ".config", "ter_dash", "pomodoro.csv")
-	//f, err := os.OpenFile(csvPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-	//if err != nil {
-	//	return
-	//}
-	//defer f.Close()
-	//f.WriteString(fmt.Sprintf("%s,%d\n", time.Now().Format(time.RFC3339), count))
-}
+func SavePomodoroCount(count int) {}
 
 func pomodorProgressBar(progress float64, width int) string {
 	if width < 2 {
@@ -33,7 +21,7 @@ func pomodorProgressBar(progress float64, width int) string {
 		filled = width
 	}
 	empty := width - filled
-	bar := lipgloss.NewStyle().Foreground(lipgloss.Color("#D20F39")).Render(strings.Repeat("█", filled)) +
+	bar := lipgloss.NewStyle().Foreground(theme.GlobalTheme.Active).Render(strings.Repeat("█", filled)) +
 		lipgloss.NewStyle().Foreground(theme.GlobalTheme.StatBarBg).Render(strings.Repeat("░", empty))
 	return bar
 }
@@ -46,9 +34,9 @@ func pomodoroSessionDots(count int, active bool) string {
 			result += " "
 		}
 		if i < cyclePos {
-			result += lipgloss.NewStyle().Foreground(lipgloss.Color("#D20F39")).Render("●")
+			result += lipgloss.NewStyle().Foreground(theme.GlobalTheme.Active).Render("●")
 		} else if i == cyclePos && active {
-			result += lipgloss.NewStyle().Foreground(lipgloss.Color("#FAB387")).Render("◐")
+			result += lipgloss.NewStyle().Foreground(theme.GlobalTheme.Accent1).Render("◐")
 		} else {
 			result += lipgloss.NewStyle().Foreground(theme.GlobalTheme.StatBarBg).Render("○")
 		}
@@ -62,16 +50,16 @@ func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, remaining time.Dura
 	var statusStyle lipgloss.Style
 	var statusText string
 	if pomodoroActive {
-		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#D20F39")).Bold(true)
+		statusStyle = lipgloss.NewStyle().Foreground(theme.GlobalTheme.Active).Bold(true)
 		statusText = "● RUNNING"
 	} else {
-		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#1E66F5"))
+		statusStyle = lipgloss.NewStyle().Foreground(theme.GlobalTheme.Border)
 		statusText = "◎  READY"
 	}
 
-	timerColor := lipgloss.Color("#1E66F5")
+	timerColor := theme.GlobalTheme.Border
 	if pomodoroActive {
-		timerColor = lipgloss.Color("#D20F39")
+		timerColor = theme.GlobalTheme.Active
 	}
 	timerStr := fmt.Sprintf("%02d:%02d", int(remaining.Minutes()), int(remaining.Seconds())%60)
 	timer := lipgloss.NewStyle().Foreground(timerColor).Bold(true).Render(timerStr)

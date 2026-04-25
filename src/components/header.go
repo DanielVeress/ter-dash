@@ -90,37 +90,35 @@ const asciiArt = `
       _|      _|_|_|  _|        _|_|_|      _|_|_|  _|_|_|      _|    _|`
 
 func RenderHeader(t time.Time, weather string) string {
-    infoBoxStyle := lipgloss.NewStyle().
-        Border(lipgloss.RoundedBorder()). // Adds a nice card-like container
-        BorderForeground(lipgloss.Color("62")). // Subtle purple/blue border
-        Padding(0, 1).
-		Width(28)
+	infoBoxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.GlobalTheme.Border).
+		Padding(0, 2).
+		Width(30)
 
-    timeStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")) // Pinkish
-    seasonStyle := lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("241")) // Gray
-    weatherHeaderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("117")) // Light blue
-    weatherStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	timeStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.GlobalTheme.Accent1)
+	seasonStyle := lipgloss.NewStyle().Italic(true).Foreground(theme.GlobalTheme.TextMuted)
+	weatherHeaderStyle := lipgloss.NewStyle().Foreground(theme.GlobalTheme.Accent2)
+	weatherStyle := lipgloss.NewStyle().Foreground(theme.GlobalTheme.TextPrimary)
 
-    currentDate := timeStyle.Render(t.Format("Monday, 02 Jan 2006"))
-    currentTimeText := timeStyle.Render(t.Format("15:04:05"))
-    currentSeason := seasonStyle.Render(getSeason(t))
-    
-    weatherBlock := lipgloss.JoinVertical(lipgloss.Center,
-        weatherHeaderStyle.Render("⛅ Local Weather"),
-        weatherStyle.Render(weather),
-    )
+	currentDate := timeStyle.Render(t.Format("Monday, 02 Jan 2006"))
+	currentTimeText := timeStyle.Render(t.Format("15:04:05"))
+	currentSeason := seasonStyle.Render(getSeason(t))
 
-    infoColumn := lipgloss.JoinVertical(lipgloss.Center,
-        currentDate,    
-        currentTimeText,
-        currentSeason,  
-        "",             
-        weatherBlock,   
-    )
+	weatherBlock := lipgloss.JoinVertical(lipgloss.Center,
+		weatherHeaderStyle.Render("⛅ Local Weather"),
+		weatherStyle.Render(weather),
+	)
 
-    infoBox := infoBoxStyle.Render(infoColumn)
-    leftArt := theme.AsciiStyle.Render(asciiArt) 
-    header := lipgloss.JoinHorizontal(lipgloss.Center, leftArt, infoBox)
+	infoColumn := lipgloss.JoinVertical(lipgloss.Center,
+		currentDate,
+		currentTimeText,
+		currentSeason,
+		"",
+		weatherBlock,
+	)
 
-    return header
+	infoBox := infoBoxStyle.Render(infoColumn)
+	leftArt := theme.AsciiStyle.Render(asciiArt)
+	return lipgloss.JoinHorizontal(lipgloss.Center, leftArt, infoBox)
 }

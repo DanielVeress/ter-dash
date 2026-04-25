@@ -59,15 +59,18 @@ func FetchNews() tea.Cmd {
 }
 
 func RenderNews(sized lipgloss.Style, news []string, innerWidth int) string {
+	bulletStyle := lipgloss.NewStyle().Foreground(theme.GlobalTheme.Accent2)
+	textStyle := lipgloss.NewStyle().Foreground(theme.GlobalTheme.TextPrimary)
+
 	newsContent := ""
 	if len(news) == 0 {
-		newsContent = "\n\nLoading news..."
+		newsContent = "\n\n" + lipgloss.NewStyle().Foreground(theme.GlobalTheme.TextMuted).Render("Loading news...")
 	} else {
 		for _, headline := range news {
-			wrappedHeadline := lipgloss.NewStyle().
-				Width(innerWidth).
-				Render("• " + headline)
-			newsContent += "\n" + wrappedHeadline
+			line := lipgloss.NewStyle().Width(innerWidth).Render(
+				bulletStyle.Render("• ") + textStyle.Render(headline),
+			)
+			newsContent += "\n" + line
 		}
 	}
 	newsBox := sized.Render(
