@@ -47,21 +47,33 @@ func FetchTasks(apiKey string, dbID string) tea.Cmd {
         }
         url := fmt.Sprintf("https://api.notion.com/v1/databases/%s/query", dbID)
 
-		payload := []byte(`{
-			"page_size": 10,
-			"filter": {
-				"property": "Status",
-				"status": {
-					"does_not_equal": "Done"
-				}
-			},
-			"sorts": [
-				{
-					"property": "Due Date",
-					"direction": "ascending"
-				}
-			]
-		}`)
+        today := time.Now().Format("2006-01-02")
+        payloadStr := fmt.Sprintf(`{
+            "page_size": 10,
+            "filter": {
+                "and": [
+                    {
+                        "property": "Status",
+                        "status": {
+                            "does_not_equal": "Done"
+                        }
+                    },
+                    {
+                        "property": "Due Date",
+                        "date": {
+                            "on_or_before": "%s"
+                        }
+                    }
+                ]
+            },
+            "sorts": [
+                {
+                    "property": "Due Date",
+                    "direction": "ascending"
+                }
+            ]
+        }`, today)
+		payload := []byte(payloadStr)
 
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
 		if err != nil {
@@ -146,7 +158,7 @@ func MarkTaskDone(pageID, apiKey string, index int) tea.Cmd {
 }
 
 func RenderTasks(sized lipgloss.Style, tasks []NotionTask, cursor int, innerWidth int) string {
-		tasksContent := ""
+	tasksContent := ""
 	if len(tasks) == 0 {
 		tasksContent = "\n\nLoading tasks..."
 	} else {
