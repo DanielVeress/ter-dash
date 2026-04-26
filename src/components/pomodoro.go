@@ -206,13 +206,13 @@ func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, pomodoroPaused bool
 	var statusText string
 	if pomodoroActive {
 		statusStyle = lipgloss.NewStyle().Foreground(theme.GlobalTheme.Active).Bold(true)
-		statusText = "● RUNNING"
+		statusText = "RUNNING"
 	} else if pomodoroPaused {
 		statusStyle = lipgloss.NewStyle().Foreground(theme.GlobalTheme.Accent1).Bold(true)
-		statusText = "⏸ PAUSED"
+		statusText = "PAUSED"
 	} else {
-		statusStyle = lipgloss.NewStyle().Foreground(theme.GlobalTheme.Border)
-		statusText = "◎  READY"
+		statusStyle = lipgloss.NewStyle().Foreground(theme.GlobalTheme.Border).Bold(true)
+		statusText = "READY"
 	}
 
 	timerColor := theme.GlobalTheme.Border
@@ -249,12 +249,51 @@ func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, pomodoroPaused bool
 	heatLabel := lipgloss.NewStyle().Foreground(theme.GlobalTheme.TextMuted).Render("28 Days")
 	heatmap := renderHeatmap(history)
 
-	content := title + "\n\n" +
-		statusStyle.Render(statusText) + "\n\n" +
-		timer + "\n\n" +
-		bar + "\n\n" +
-		heatLabel + "\n" +
-		heatmap
+	rightBlock := lipgloss.JoinVertical(lipgloss.Left,
+		heatLabel,
+		heatmap,
+	)
+
+	infoContent := lipgloss.JoinVertical(lipgloss.Center,
+		statusStyle.Render(statusText),
+		"", // Spacer between status and time
+		timer,
+	)
+
+	rightWidth := lipgloss.Width(rightBlock)
+	rightHeight := lipgloss.Height(rightBlock)
+	titleHeight := lipgloss.Height(title)
+
+	leftSpaceWidth := width - rightWidth
+	if leftSpaceWidth < 0 {
+		leftSpaceWidth = 0
+	}
+
+	infoContainerHeight := rightHeight - titleHeight
+	if infoContainerHeight < 1 {
+		infoContainerHeight = 5 // Fallback safeguard
+	}
+
+	centeredInfo := lipgloss.Place(
+		leftSpaceWidth,
+		infoContainerHeight,
+		lipgloss.Center, // Horizontal Center
+		lipgloss.Center, // Vertical Center
+		infoContent,
+	)
+
+	leftBlock := lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		centeredInfo,
+	)
+
+	topSection := lipgloss.JoinHorizontal(lipgloss.Top, leftBlock, rightBlock)
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		topSection,
+		"", // Spacer before the progress bar
+		bar,
+	)
 
 	return box.Render(content)
 }
