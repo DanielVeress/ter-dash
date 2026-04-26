@@ -1,7 +1,11 @@
 package components
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,7 +14,91 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func SavePomodoroCount(count int) {}
+func pomodoroLogPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "ter_dash", "pomodoro_log.csv"), nil
+}
+
+func readPomodoroLog(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines, scanner.Err()
+}
+
+func LoadTodayPomodoroCount() int {
+	path, err := pomodoroLogPath()
+	if err != nil {
+		return 0
+	}
+	today := time.Now().Format("2006-01-02")
+	lines, err := readPomodoroLog(path)
+	if err != nil {
+		return 0
+	}
+	for _, line := range lines {
+		parts := strings.SplitN(line, ",", 2)
+		if len(parts) == 2 && parts[0] == today {
+			count, _ := strconv.Atoi(parts[1])
+			return count
+		}
+	}
+	return 0
+}
+
+func SavePomodoroCount(count int) {
+	path, err := pomodoroLogPath()
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return
+	}
+
+	today := time.Now().Format("2006-01-02")
+	lines, _ := readPomodoroLog(path)
+
+	updated := false
+	for i, line := range lines {
+		parts := strings.SplitN(line, ",", 2)
+		if len(parts) == 2 && parts[0] == today {
+			lines[i] = fmt.Sprintf("%s,%d", today, count)
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		lines = append(lines, fmt.Sprintf("%s,%d", today, count))
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	for _, line := range lines {
+		fmt.Fprintln(w, line)
+	}
+	w.Flush()
+}
 
 func pomodorProgressBar(progress float64, width int) string {
 	if width < 2 {

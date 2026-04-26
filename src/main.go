@@ -46,6 +46,7 @@ type model struct {
 	pomodoroStart               time.Time
 	pomodoroElapsedBeforePause  time.Duration
 	pomodoroCount               int
+	pomodoroDate                string
 	showHelp    bool
 	err         error
 }
@@ -134,6 +135,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if time.Since(m.lastTasks) > 5*time.Minute {
 			m.lastTasks = time.Now()
 			cmds = append(cmds, components.FetchTasks(m.notionKey, m.notionDB))
+		}
+
+		// Midnight reset
+		today := time.Now().Format("2006-01-02")
+		if today != m.pomodoroDate {
+			m.pomodoroDate = today
+			m.pomodoroCount = 0
+			m.pomodoroActive = false
+			m.pomodoroPaused = false
+			m.pomodoroElapsedBeforePause = 0
 		}
 
 		// Pomodoro
@@ -371,11 +382,13 @@ func loadOrSetupConfig() Config {
 func main() {
 	cfg := loadOrSetupConfig()
 	initialModel := model{
-		time:      time.Now(),
-		weather:   "Fetching weather...",
-		notionKey: cfg.NotionAPIKey,
-        notionDB:  cfg.NotionDatabase,
-    }
+		time:         time.Now(),
+		weather:      "Fetching weather...",
+		notionKey:    cfg.NotionAPIKey,
+		notionDB:     cfg.NotionDatabase,
+		pomodoroCount: components.LoadTodayPomodoroCount(),
+		pomodoroDate:  time.Now().Format("2006-01-02"),
+	}
 
 	p := tea.NewProgram(initialModel, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
