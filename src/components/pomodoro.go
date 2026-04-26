@@ -43,6 +43,26 @@ func readPomodoroLog(path string) ([]string, error) {
 	return lines, scanner.Err()
 }
 
+func LoadAllPomodoroData() map[string]int {
+	path, err := pomodoroLogPath()
+	if err != nil {
+		return map[string]int{}
+	}
+	lines, err := readPomodoroLog(path)
+	if err != nil {
+		return map[string]int{}
+	}
+	data := make(map[string]int)
+	for _, line := range lines {
+		parts := strings.SplitN(line, ",", 2)
+		if len(parts) == 2 {
+			count, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
+			data[parts[0]] = count
+		}
+	}
+	return data
+}
+
 func LoadTodayPomodoroCount() int {
 	path, err := pomodoroLogPath()
 	if err != nil {
@@ -100,6 +120,64 @@ func SavePomodoroCount(count int) {
 	w.Flush()
 }
 
+var heatmapColors = []lipgloss.Color{
+	"#313244", // 0: empty   (Catppuccin Surface0)
+	"#1A4731", // 1: 1-2     (dark green)
+	"#2A7A50", // 2: 3-4     (medium green)
+	"#A6E3A1", // 3: 5-7     (Catppuccin Green)
+	"#94E2D5", // 4: 8+      (Catppuccin Teal)
+}
+
+func heatLevel(count int) int {
+	switch {
+	case count <= 0:
+		return 0
+	case count <= 2:
+		return 1
+	case count <= 4:
+		return 2
+	case count <= 7:
+		return 3
+	default:
+		return 4
+	}
+}
+
+func renderHeatmap(data map[string]int) string {
+	today := time.Now()
+	dayLabels := []string{"M", "T", "W", "T", "F", "S", "S"}
+
+	todayWeekday := int(today.Weekday())       // 0=Sun … 6=Sat
+	mondayOffset := (todayWeekday - 1 + 7) % 7 // days since last Monday
+	thisWeekMonday := today.AddDate(0, 0, -mondayOffset)
+
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086"))
+
+	rows := make([]string, 7)
+	for row := range 7 {
+		rows[row] = mutedStyle.Render(dayLabels[row]) + " "
+		for col := range 4 {
+			weeksAgo := 3 - col
+			target := thisWeekMonday.AddDate(0, 0, row-weeksAgo*7)
+
+			var block string
+			if target.After(today) {
+				block = lipgloss.NewStyle().Foreground(heatmapColors[0]).Render("█")
+			} else {
+				count := data[target.Format("2006-01-02")]
+				block = lipgloss.NewStyle().Foreground(heatmapColors[heatLevel(count)]).Render("█")
+			}
+
+			if col < 3 {
+				rows[row] += block + " "
+			} else {
+				rows[row] += block
+			}
+		}
+	}
+	return strings.Join(rows, "\n")
+}
+
 func pomodorProgressBar(progress float64, width int) string {
 	if width < 2 {
 		return ""
@@ -114,7 +192,7 @@ func pomodorProgressBar(progress float64, width int) string {
 	return bar
 }
 
-func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, pomodoroPaused bool, remaining time.Duration, count int, elapsed time.Duration, width int) string {
+func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, pomodoroPaused bool, remaining time.Duration, count int, elapsed time.Duration, width int, history map[string]int) string {
 	title := theme.TitleStyle.Render("🍅 Pomodoro")
 
 	var statusStyle lipgloss.Style
@@ -149,11 +227,15 @@ func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, pomodoroPaused bool
 
 	bar := pomodorProgressBar(progress, width)
 
+	heatLabel := lipgloss.NewStyle().Foreground(theme.GlobalTheme.TextMuted).Render("28 Days")
+	heatmap := renderHeatmap(history)
+
 	content := title + "\n\n" +
 		statusStyle.Render(statusText) + "\n\n" +
 		timer + "\n\n" +
-		bar
-		
+		bar + "\n\n" +
+		heatLabel + "\n" +
+		heatmap
 
 	return box.Render(content)
 }

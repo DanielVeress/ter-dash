@@ -41,12 +41,13 @@ type model struct {
 	lastTasks   time.Time
 	notionKey   string
 	notionDB    string
-	pomodoroActive              bool
-	pomodoroPaused              bool
-	pomodoroStart               time.Time
-	pomodoroElapsedBeforePause  time.Duration
-	pomodoroCount               int
-	pomodoroDate                string
+	pomodoroActive             bool
+	pomodoroPaused             bool
+	pomodoroStart              time.Time
+	pomodoroElapsedBeforePause time.Duration
+	pomodoroCount              int
+	pomodoroDate               string
+	pomodoroHistory            map[string]int
 	showHelp    bool
 	err         error
 }
@@ -158,6 +159,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pomodoroElapsedBeforePause = 0
 			m.pomodoroCount++
 			components.SavePomodoroCount(m.pomodoroCount)
+			m.pomodoroHistory[today] = m.pomodoroCount
 		}
 
 		return m, tea.Batch(cmds...)
@@ -268,8 +270,9 @@ func computeDims(totalWidth int) layoutDims {
 }
 
 func renderLeftColumn(m model, dims layoutDims, elapsed, remaining time.Duration) string {
+	pomStyle := theme.BoxStyle.Width(dims.halfCol)
 	statsBox := components.RenderStats(dims.halfSized, m.cpu, m.ram, m.disk, dims.halfInner)
-	pomodoroBox := components.RenderPomodoro(dims.halfSized, m.pomodoroActive, m.pomodoroPaused, remaining, m.pomodoroCount, elapsed, dims.halfInner)
+	pomodoroBox := components.RenderPomodoro(pomStyle, m.pomodoroActive, m.pomodoroPaused, remaining, m.pomodoroCount, elapsed, dims.halfInner, m.pomodoroHistory)
 	newsBox := components.RenderNews(dims.sized, m.news, dims.innerWidth)
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, statsBox, pomodoroBox)
 	return lipgloss.JoinVertical(lipgloss.Left, topRow, newsBox)
@@ -382,12 +385,13 @@ func loadOrSetupConfig() Config {
 func main() {
 	cfg := loadOrSetupConfig()
 	initialModel := model{
-		time:         time.Now(),
-		weather:      "Fetching weather...",
-		notionKey:    cfg.NotionAPIKey,
-		notionDB:     cfg.NotionDatabase,
-		pomodoroCount: components.LoadTodayPomodoroCount(),
-		pomodoroDate:  time.Now().Format("2006-01-02"),
+		time:            time.Now(),
+		weather:         "Fetching weather...",
+		notionKey:       cfg.NotionAPIKey,
+		notionDB:        cfg.NotionDatabase,
+		pomodoroCount:   components.LoadTodayPomodoroCount(),
+		pomodoroDate:    time.Now().Format("2006-01-02"),
+		pomodoroHistory: components.LoadAllPomodoroData(),
 	}
 
 	p := tea.NewProgram(initialModel, tea.WithAltScreen())
