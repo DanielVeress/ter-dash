@@ -26,24 +26,6 @@ func pomodorProgressBar(progress float64, width int) string {
 	return bar
 }
 
-func pomodoroSessionDots(count int, active bool) string {
-	cyclePos := count % 4
-	result := ""
-	for i := 0; i < 4; i++ {
-		if i > 0 {
-			result += " "
-		}
-		if i < cyclePos {
-			result += lipgloss.NewStyle().Foreground(theme.GlobalTheme.Active).Render("●")
-		} else if i == cyclePos && active {
-			result += lipgloss.NewStyle().Foreground(theme.GlobalTheme.Accent1).Render("◐")
-		} else {
-			result += lipgloss.NewStyle().Foreground(theme.GlobalTheme.StatBarBg).Render("○")
-		}
-	}
-	return result
-}
-
 func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, pomodoroPaused bool, remaining time.Duration, count int, elapsed time.Duration, width int) string {
 	title := theme.TitleStyle.Render("🍅 Pomodoro")
 
@@ -78,13 +60,12 @@ func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, pomodoroPaused bool
 	}
 
 	bar := pomodorProgressBar(progress, width)
-	dots := pomodoroSessionDots(count, pomodoroActive)
 
 	content := title + "\n\n" +
 		statusStyle.Render(statusText) + "\n\n" +
 		timer + "\n\n" +
-		bar + "\n\n" +
-		dots
+		bar
+		
 
 	return box.Render(content)
 }
