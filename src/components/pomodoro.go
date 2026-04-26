@@ -3,6 +3,7 @@ package components
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -120,6 +121,15 @@ func SavePomodoroCount(count int) {
 	w.Flush()
 }
 
+func pomodoroAverage(data map[string]int, days int) float64 {
+	var total int
+	for i := 1; i <= days; i++ {
+		date := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
+		total += data[date]
+	}
+	return float64(total) / float64(days)
+}
+
 var heatmapColors = []lipgloss.Color{
 	"#313244", // 0: empty   (Catppuccin Surface0)
 	"#1A4731", // 1: 1-2     (dark green)
@@ -182,10 +192,7 @@ func pomodorProgressBar(progress float64, width int) string {
 	if width < 2 {
 		return ""
 	}
-	filled := int(progress * float64(width))
-	if filled > width {
-		filled = width
-	}
+	filled := min(int(progress*float64(width)), width)
 	empty := width - filled
 	bar := lipgloss.NewStyle().Foreground(theme.GlobalTheme.Active).Render(strings.Repeat("█", filled)) +
 		lipgloss.NewStyle().Foreground(theme.GlobalTheme.StatBarBg).Render(strings.Repeat("░", empty))
@@ -226,6 +233,18 @@ func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, pomodoroPaused bool
 	}
 
 	bar := pomodorProgressBar(progress, width)
+
+	avg := pomodoroAverage(history, 14)
+	borderColor := theme.GlobalTheme.Border
+	if count > 0 || avg > 0 {
+		rounded := math.Round(avg)
+		if float64(count) > rounded {
+			borderColor = theme.GlobalTheme.Warning // gold: beating your average
+		} else if float64(count) >= rounded {
+			borderColor = theme.GlobalTheme.Success // green: meeting your average
+		}
+	}
+	box = box.BorderForeground(borderColor)
 
 	heatLabel := lipgloss.NewStyle().Foreground(theme.GlobalTheme.TextMuted).Render("28 Days")
 	heatmap := renderHeatmap(history)
