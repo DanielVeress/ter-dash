@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gen2brain/beeep"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -160,6 +162,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pomodoroCount++
 			components.SavePomodoroCount(m.pomodoroCount)
 			m.pomodoroHistory[today] = m.pomodoroCount
+			go beeep.Notify("Pomodoro done!", "Time for a break. 🍅", "")
 		}
 
 		return m, tea.Batch(cmds...)

@@ -1,0 +1,35 @@
+Success: 
+- add persistance to pomodoro (count is saved and visualized)
+
+-- Planned Features -- 
+
+- Panels -
+
+> Header:
+    - is the current layout good?
+> News:
+    - AI news summarizer
+    - using a key to switch from economic/stock related news to generic news or hungarian news
+    - easily set (new) sources
+> Stats:
+    - add network traffic
+> Notion Tasks
+> [NEW] Pomodoro
+    - Basic feature: count backwards from 25 minutes
+        - when counting backwards color should change to red or something like that
+        - when not in pomodoro, then color should be blue
+    - Stat feature:
+        - each pomodoro finished is counted
+        - after reaching 12 the style of the whole terdash should change into a golden style
+    - Stat save feature:
+        - a counted pomodoros in a .csv or other file format next to the config file
+        - the counts are shown in some kind of barchart or other visualization
+        - the previous day's count is shown as a goal
+> [NEW] Calendar
+    - through google calendar
+    - showing today and tomorrow's events
+
+- Other - 
+> add layout toggle (like pressing h), when you have to focus on work (hides, news, and stats)
+> model struct better (more modular)
+ --------
