@@ -188,23 +188,32 @@ func renderHeatmap(data map[string]int) string {
 	return strings.Join(rows, "\n")
 }
 
-func pomodorProgressBar(progress float64, width int) string {
+var breakColor = lipgloss.Color("#89B4FA") // Catppuccin Blue
+
+func pomodorProgressBar(progress float64, width int, isBreak bool) string {
 	if width < 2 {
 		return ""
 	}
 	filled := min(int(progress*float64(width)), width)
 	empty := width - filled
-	bar := lipgloss.NewStyle().Foreground(theme.GlobalTheme.Active).Render(strings.Repeat("█", filled)) +
+	barFg := theme.GlobalTheme.Active
+	if isBreak {
+		barFg = breakColor
+	}
+	bar := lipgloss.NewStyle().Foreground(barFg).Render(strings.Repeat("█", filled)) +
 		lipgloss.NewStyle().Foreground(theme.GlobalTheme.StatBarBg).Render(strings.Repeat("░", empty))
 	return bar
 }
 
-func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, pomodoroPaused bool, remaining time.Duration, count int, elapsed time.Duration, width int, history map[string]int) string {
+func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, pomodoroPaused bool, remaining time.Duration, count int, elapsed time.Duration, width int, history map[string]int, breakActive bool, breakElapsed time.Duration) string {
 	title := theme.TitleStyle.Render("🍅 Pomodoro")
 
 	var statusStyle lipgloss.Style
 	var statusText string
-	if pomodoroActive {
+	if breakActive {
+		statusStyle = lipgloss.NewStyle().Foreground(breakColor).Bold(true)
+		statusText = "BREAK"
+	} else if pomodoroActive {
 		statusStyle = lipgloss.NewStyle().Foreground(theme.GlobalTheme.Active).Bold(true)
 		statusText = "RUNNING"
 	} else if pomodoroPaused {
@@ -216,23 +225,37 @@ func RenderPomodoro(box lipgloss.Style, pomodoroActive bool, pomodoroPaused bool
 	}
 
 	timerColor := theme.GlobalTheme.Border
-	if pomodoroActive {
+	if breakActive {
+		timerColor = breakColor
+	} else if pomodoroActive {
 		timerColor = theme.GlobalTheme.Active
 	} else if pomodoroPaused {
 		timerColor = theme.GlobalTheme.Accent1
 	}
-	timerStr := fmt.Sprintf("%02d:%02d", int(remaining.Minutes()), int(remaining.Seconds())%60)
+
+	var timerStr string
+	if breakActive {
+		breakRemaining := max(5*time.Minute-breakElapsed, 0)
+		timerStr = fmt.Sprintf("%02d:%02d", int(breakRemaining.Minutes()), int(breakRemaining.Seconds())%60)
+	} else {
+		timerStr = fmt.Sprintf("%02d:%02d", int(remaining.Minutes()), int(remaining.Seconds())%60)
+	}
 	timer := lipgloss.NewStyle().Foreground(timerColor).Bold(true).Render(timerStr)
 
 	progress := 0.0
-	if pomodoroActive || pomodoroPaused {
+	if breakActive {
+		progress = breakElapsed.Seconds() / (5 * 60)
+		if progress > 1 {
+			progress = 1
+		}
+	} else if pomodoroActive || pomodoroPaused {
 		progress = elapsed.Seconds() / (25 * 60)
 		if progress > 1 {
 			progress = 1
 		}
 	}
 
-	bar := pomodorProgressBar(progress, width)
+	bar := pomodorProgressBar(progress, width, breakActive)
 
 	avg := pomodoroAverage(history, 14)
 	borderColor := theme.GlobalTheme.Border

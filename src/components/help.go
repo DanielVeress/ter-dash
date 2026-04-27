@@ -16,7 +16,8 @@ var bindings = []binding{
 	{"k / ↑", "Move cursor up"},
 	{"enter", "Mark selected task as done"},
 	{"p", "Start / pause / resume Pomodoro"},
-	{"s", "Stop Pomodoro"},
+	{"b", "Start 5-min break (after pomodoro finishes)"},
+	{"s", "Stop Pomodoro / Break"},
 	{"?", "Toggle this help"},
 	{"q / ctrl+c", "Quit"},
 }

@@ -50,6 +50,8 @@ type model struct {
 	pomodoroCount              int
 	pomodoroDate               string
 	pomodoroHistory            map[string]int
+	breakActive                bool
+	breakStart                 time.Time
 	showHelp    bool
 	err         error
 }
@@ -103,10 +105,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pomodoroStart = time.Now()
 				m.pomodoroActive = true
 			}
+		case "b":
+			if !m.pomodoroActive && !m.pomodoroPaused && !m.breakActive {
+				m.breakActive = true
+				m.breakStart = time.Now()
+			}
 		case "s":
 			m.pomodoroActive = false
 			m.pomodoroPaused = false
 			m.pomodoroElapsedBeforePause = 0
+			m.breakActive = false
 		case "enter":
 			if len(m.tasks) > 0 && m.tasks[m.cursor].ID != "" {
 				m.tasks[m.cursor].IsPending = true
@@ -148,6 +156,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pomodoroActive = false
 			m.pomodoroPaused = false
 			m.pomodoroElapsedBeforePause = 0
+			m.breakActive = false
 		}
 
 		// Pomodoro
@@ -162,7 +171,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pomodoroCount++
 			components.SavePomodoroCount(m.pomodoroCount)
 			m.pomodoroHistory[today] = m.pomodoroCount
-			go beeep.Notify("Pomodoro done!", "Time for a break. 🍅", "")
+			go beeep.Notify("Pomodoro done!", "Press 'b' to start your break. 🍅", "")
+		}
+
+		if m.breakActive && time.Since(m.breakStart) > 5*time.Minute {
+			m.breakActive = false
+			m.breakStart = time.Time{}
+			go beeep.Notify("Break over!", "Press 'p' to start a new pomodoro. 🍅", "")
 		}
 
 		return m, tea.Batch(cmds...)
@@ -272,10 +287,10 @@ func computeDims(totalWidth int) layoutDims {
 	}
 }
 
-func renderLeftColumn(m model, dims layoutDims, elapsed, remaining time.Duration) string {
+func renderLeftColumn(m model, dims layoutDims, elapsed, remaining time.Duration, breakElapsed time.Duration) string {
 	pomStyle := theme.BoxStyle.Width(dims.halfCol)
 	statsBox := components.RenderStats(dims.halfSized, m.cpu, m.ram, m.disk, dims.halfInner)
-	pomodoroBox := components.RenderPomodoro(pomStyle, m.pomodoroActive, m.pomodoroPaused, remaining, m.pomodoroCount, elapsed, dims.halfInner, m.pomodoroHistory)
+	pomodoroBox := components.RenderPomodoro(pomStyle, m.pomodoroActive, m.pomodoroPaused, remaining, m.pomodoroCount, elapsed, dims.halfInner, m.pomodoroHistory, m.breakActive, breakElapsed)
 	newsBox := components.RenderNews(dims.sized, m.news, dims.innerWidth)
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, statsBox, pomodoroBox)
 	return lipgloss.JoinVertical(lipgloss.Left, topRow, newsBox)
@@ -315,9 +330,14 @@ func (m model) View() string {
 		remaining = 25 * time.Minute
 	}
 
+	var breakElapsed time.Duration
+	if m.breakActive {
+		breakElapsed = time.Since(m.breakStart)
+	}
+
 	header := components.RenderHeader(m.time, m.weather)
 	grid := lipgloss.JoinHorizontal(lipgloss.Top,
-		renderLeftColumn(m, dims, elapsed, remaining),
+		renderLeftColumn(m, dims, elapsed, remaining, breakElapsed),
 		renderRightColumn(m, dims),
 	)
 
