@@ -171,13 +171,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pomodoroCount++
 			components.SavePomodoroCount(m.pomodoroCount)
 			m.pomodoroHistory[today] = m.pomodoroCount
-			go beeep.Notify("Pomodoro done!", "Press 'b' to start your break. 🍅", "")
+			go func() {
+				beeep.Beep(880, 500)
+				beeep.Notify("Pomodoro done!", "Press 'b' to start your break. 🍅", "")
+			}()
 		}
 
 		if m.breakActive && time.Since(m.breakStart) > 5*time.Minute {
 			m.breakActive = false
 			m.breakStart = time.Time{}
-			go beeep.Notify("Break over!", "Press 'p' to start a new pomodoro. 🍅", "")
+			go func() {
+				beeep.Beep(660, 500)
+				beeep.Notify("Break over!", "Press 'p' to start a new pomodoro. 🍅", "")
+			}()
 		}
 
 		return m, tea.Batch(cmds...)
