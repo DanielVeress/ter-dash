@@ -163,13 +163,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch m.currentPriority {
 			case "Top":
 				m.currentPriority = "High"
-				m.tasks = sliceCopy(m.taskCacheHigh)
+				m.tasks = components.FilterUrgentOrAll(m.taskCacheHigh)
 			case "High":
 				m.currentPriority = "No Priority"
-				m.tasks = sliceCopy(m.taskCacheNoPriority)
+				m.tasks = components.FilterUrgentOrAll(m.taskCacheNoPriority)
 			default:
 				m.currentPriority = "Top"
-				m.tasks = sliceCopy(m.taskCacheTop)
+				m.tasks = components.FilterUrgentOrAll(m.taskCacheTop)
 			}
 			m.cursor = 0
 			if len(m.tasks) == 0 {
@@ -286,7 +286,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				hasActiveTask = true
 			}
 
-			m.tasks = sliceCopy(msg.Tasks)
+			m.tasks = components.FilterUrgentOrAll(msg.Tasks)
 			if len(m.tasks) == 0 {
 				m.tasks = []components.NotionTask{{Label: "No tasks in this priority."}}
 			}
@@ -316,18 +316,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case components.ClearFlashMsg:
-		for i := range m.tasks {
-			if m.tasks[i].ID == msg.ID {
-				m.tasks = append(m.tasks[:i], m.tasks[i+1:]...)
-				if m.cursor >= len(m.tasks) && m.cursor > 0 {
-					m.cursor--
-				}
-				if len(m.tasks) == 0 {
-					m.tasks = []components.NotionTask{{Label: "No tasks in this priority."}}
-				}
-				break
-			}
-		}
 		switch m.currentPriority {
 		case "Top":
 			m.taskCacheTop = removeTaskByID(m.taskCacheTop, msg.ID)
@@ -335,6 +323,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.taskCacheHigh = removeTaskByID(m.taskCacheHigh, msg.ID)
 		case "No Priority":
 			m.taskCacheNoPriority = removeTaskByID(m.taskCacheNoPriority, msg.ID)
+		}
+		var updatedCache []components.NotionTask
+		switch m.currentPriority {
+		case "Top":
+			updatedCache = m.taskCacheTop
+		case "High":
+			updatedCache = m.taskCacheHigh
+		default:
+			updatedCache = m.taskCacheNoPriority
+		}
+		m.tasks = components.FilterUrgentOrAll(updatedCache)
+		if len(m.tasks) == 0 {
+			m.tasks = []components.NotionTask{{Label: "No tasks in this priority."}}
+		}
+		if m.cursor >= len(m.tasks) && m.cursor > 0 {
+			m.cursor--
 		}
 		return m, nil
     

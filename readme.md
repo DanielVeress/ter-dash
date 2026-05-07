@@ -15,7 +15,7 @@ A terminal dashboard built with [Bubble Tea](https://github.com/charmbracelet/bu
 - **Header** — current date, time, season, and live local weather via [wttr.in](https://wttr.in)
 - **System Stats** — real-time CPU, RAM, and disk usage with visual progress bars
 - **News** — latest headlines from NPR, The Guardian, Telex, and HVG, refreshed hourly
-- **Notion Tasks** — fetches your incomplete tasks from a Notion database, sorted by due date; mark tasks as done directly from the terminal
+- **Notion Tasks** — fetches your incomplete tasks from a Notion database, sorted by due date; shows only tasks due today or earlier (urgent) first — once all urgent tasks are cleared, future tasks become visible; mark tasks as done directly from the terminal
 
 ## Keybindings
 
@@ -60,7 +60,6 @@ On first run, you will be prompted to enter your Notion API key and database ID.
 - **AI news summarizer** — summarize headlines using an LLM
 - **News tabs** — switch between general, economic/stock, and Hungarian news with Tab
 - **Network traffic** — add live network I/O to system stats
-- **Task urgency filter** — toggle between urgent and non-urgent Notion tasks
 - **Better layout** — improved weather, date/time, and ASCII art formatting with a softer color palette
 - **Pomodoro timer** — built-in focus timer panel
 - **Calendar panel** — display upcoming calendar events

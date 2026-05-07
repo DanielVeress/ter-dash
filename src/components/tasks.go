@@ -15,11 +15,30 @@ import (
 )
 
 type NotionTask struct {
-	ID    string
-	Label string
+	ID      string
+	Label   string
+	DueDate string // "YYYY-MM-DD", empty if not set
 
 	IsPending      bool
 	IsJustFinished bool
+}
+
+// FilterUrgentOrAll returns tasks due today or earlier (urgent).
+// If no urgent tasks remain, it returns all tasks so future work is still visible.
+func FilterUrgentOrAll(tasks []NotionTask) []NotionTask {
+	today := time.Now().Format("2006-01-02")
+	var urgent []NotionTask
+	for _, t := range tasks {
+		if t.DueDate != "" && t.DueDate <= today {
+			urgent = append(urgent, t)
+		}
+	}
+	if len(urgent) > 0 {
+		return urgent
+	}
+	result := make([]NotionTask, len(tasks))
+	copy(result, tasks)
+	return result
 }
 
 type NotionResponse struct {
@@ -204,12 +223,14 @@ func FetchTasksByPriority(apiKey, dbID, priority string) tea.Cmd {
 				}
 			}
 
+			dueDate := ""
 			dateStr := ""
 			if dueProp, ok := page.Properties["Due Date"]; ok && dueProp.Date != nil {
-				dateStr = fmt.Sprintf(" (Due: %s)", dueProp.Date.Start)
+				dueDate = dueProp.Date.Start
+				dateStr = fmt.Sprintf(" (Due: %s)", dueDate)
 			}
 
-			tasks = append(tasks, NotionTask{ID: page.ID, Label: title + dateStr})
+			tasks = append(tasks, NotionTask{ID: page.ID, Label: title + dateStr, DueDate: dueDate})
 		}
 
 		return PriorityTasksMsg{Priority: priority, Tasks: tasks}
