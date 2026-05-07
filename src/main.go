@@ -2,9 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -17,6 +20,22 @@ import (
 	"terminal-dashboard/components"
 	"terminal-dashboard/theme"
 )
+
+//go:embed assets/announcer_victory.wav
+var pomodoroSound []byte
+
+//go:embed assets/damit.wav
+var breakSound []byte
+
+func playSound(data []byte) {
+	for _, player := range []string{"paplay", "aplay"} {
+		cmd := exec.Command(player, "-")
+		cmd.Stdin = bytes.NewReader(data)
+		if err := cmd.Run(); err == nil {
+			return
+		}
+	}
+}
 
 var (
 	GlobalTheme = theme.GlobalTheme
@@ -217,7 +236,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			components.SavePomodoroCount(m.pomodoroCount)
 			m.pomodoroHistory[today] = m.pomodoroCount
 			go func() {
-				beeep.Beep(880, 500)
+				playSound(pomodoroSound)
 				beeep.Notify("Pomodoro done!", "Press 'b' to start your break. 🍅", "")
 			}()
 		}
@@ -226,7 +245,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.breakActive = false
 			m.breakStart = time.Time{}
 			go func() {
-				beeep.Beep(660, 500)
+				playSound(breakSound)
 				beeep.Notify("Break over!", "Press 'p' to start a new pomodoro. 🍅", "")
 			}()
 		}
