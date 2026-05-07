@@ -38,11 +38,15 @@ type model struct {
 	lastWeather time.Time
 	news        []string
 	lastNews    time.Time
-	tasks       []components.NotionTask
-	cursor      int
-	lastTasks   time.Time
-	notionKey   string
-	notionDB    string
+	tasks               []components.NotionTask
+	taskCacheTop        []components.NotionTask
+	taskCacheHigh       []components.NotionTask
+	taskCacheNoPriority []components.NotionTask
+	currentPriority     string
+	cursor              int
+	lastTasks           time.Time
+	notionKey           string
+	notionDB            string
 	pomodoroActive             bool
 	pomodoroPaused             bool
 	pomodoroStart              time.Time
@@ -58,6 +62,21 @@ type model struct {
 
 type tickMsg time.Time
 
+func sliceCopy(tasks []components.NotionTask) []components.NotionTask {
+	result := make([]components.NotionTask, len(tasks))
+	copy(result, tasks)
+	return result
+}
+
+func removeTaskByID(tasks []components.NotionTask, id string) []components.NotionTask {
+	for i := range tasks {
+		if tasks[i].ID == id {
+			return append(tasks[:i], tasks[i+1:]...)
+		}
+	}
+	return tasks
+}
+
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -70,7 +89,9 @@ func (m model) Init() tea.Cmd {
 		components.FetchStats(),
 		components.FetchWeather(),
 		components.FetchNews(),
-		components.FetchTasks(m.notionKey, m.notionDB),
+		components.FetchTasksByPriority(m.notionKey, m.notionDB, "Top"),
+		components.FetchTasksByPriority(m.notionKey, m.notionDB, "High"),
+		components.FetchTasksByPriority(m.notionKey, m.notionDB, "No Priority"),
 	)
 }
 
@@ -115,6 +136,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pomodoroPaused = false
 			m.pomodoroElapsedBeforePause = 0
 			m.breakActive = false
+		case "tab":
+			switch m.currentPriority {
+			case "Top":
+				m.currentPriority = "High"
+				m.tasks = sliceCopy(m.taskCacheHigh)
+			case "High":
+				m.currentPriority = "No Priority"
+				m.tasks = sliceCopy(m.taskCacheNoPriority)
+			default:
+				m.currentPriority = "Top"
+				m.tasks = sliceCopy(m.taskCacheTop)
+			}
+			m.cursor = 0
+			if len(m.tasks) == 0 {
+				m.tasks = []components.NotionTask{{Label: "No tasks in this priority."}}
+			}
 		case "enter":
 			if len(m.tasks) > 0 && m.tasks[m.cursor].ID != "" {
 				m.tasks[m.cursor].IsPending = true
@@ -145,7 +182,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if time.Since(m.lastTasks) > 5*time.Minute {
 			m.lastTasks = time.Now()
-			cmds = append(cmds, components.FetchTasks(m.notionKey, m.notionDB))
+			cmds = append(cmds,
+				components.FetchTasksByPriority(m.notionKey, m.notionDB, "Top"),
+				components.FetchTasksByPriority(m.notionKey, m.notionDB, "High"),
+				components.FetchTasksByPriority(m.notionKey, m.notionDB, "No Priority"),
+			)
 		}
 
 		// Midnight reset
@@ -203,30 +244,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastNews = time.Now()
 		return m, nil
 
-	case components.TasksMsg:
-		var activeTaskID string
-		hasActiveTask := false
-
-		if len(m.tasks) > 0 && m.cursor >= 0 && m.cursor < len(m.tasks) {
-			activeTaskID = m.tasks[m.cursor].ID
-			hasActiveTask = true
+	case components.PriorityTasksMsg:
+		switch msg.Priority {
+		case "Top":
+			m.taskCacheTop = msg.Tasks
+		case "High":
+			m.taskCacheHigh = msg.Tasks
+		case "No Priority":
+			m.taskCacheNoPriority = msg.Tasks
 		}
-		
-		m.tasks = msg
 		m.err = nil
-		m.lastTasks = time.Now()
-		m.cursor = 0 // default
-		
-		// Search for the active task's position and set the cursor to it
-		if hasActiveTask {
-			for i, task := range m.tasks {
-				if task.ID == activeTaskID {
-					m.cursor = i
-					break
+
+		if msg.Priority == m.currentPriority {
+			var activeTaskID string
+			hasActiveTask := false
+			if len(m.tasks) > 0 && m.cursor >= 0 && m.cursor < len(m.tasks) {
+				activeTaskID = m.tasks[m.cursor].ID
+				hasActiveTask = true
+			}
+
+			m.tasks = sliceCopy(msg.Tasks)
+			if len(m.tasks) == 0 {
+				m.tasks = []components.NotionTask{{Label: "No tasks in this priority."}}
+			}
+			m.cursor = 0
+			if hasActiveTask {
+				for i, task := range m.tasks {
+					if task.ID == activeTaskID {
+						m.cursor = i
+						break
+					}
 				}
 			}
 		}
-
 		return m, nil
 
 	case components.TaskDoneMsg:
@@ -250,10 +300,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor--
 				}
 				if len(m.tasks) == 0 {
-					m.tasks = []components.NotionTask{{Label: "No upcoming tasks!"}}
+					m.tasks = []components.NotionTask{{Label: "No tasks in this priority."}}
 				}
 				break
 			}
+		}
+		switch m.currentPriority {
+		case "Top":
+			m.taskCacheTop = removeTaskByID(m.taskCacheTop, msg.ID)
+		case "High":
+			m.taskCacheHigh = removeTaskByID(m.taskCacheHigh, msg.ID)
+		case "No Priority":
+			m.taskCacheNoPriority = removeTaskByID(m.taskCacheNoPriority, msg.ID)
 		}
 		return m, nil
     
@@ -303,7 +361,7 @@ func renderLeftColumn(m model, dims layoutDims, elapsed, remaining time.Duration
 }
 
 func renderRightColumn(m model, dims layoutDims) string {
-	return components.RenderTasks(dims.sized, m.tasks, m.cursor, dims.innerWidth)
+	return components.RenderTasks(dims.sized, m.tasks, m.cursor, dims.innerWidth, m.currentPriority)
 }
 
 func renderStatusBar(m model, width int) string {
@@ -418,6 +476,7 @@ func main() {
 		weather:         "Fetching weather...",
 		notionKey:       cfg.NotionAPIKey,
 		notionDB:        cfg.NotionDatabase,
+		currentPriority: "Top",
 		pomodoroCount:   components.LoadTodayPomodoroCount(),
 		pomodoroDate:    time.Now().Format("2006-01-02"),
 		pomodoroHistory: components.LoadAllPomodoroData(),

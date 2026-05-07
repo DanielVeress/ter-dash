@@ -15,6 +15,7 @@ var bindings = []binding{
 	{"j / ↓", "Move cursor down"},
 	{"k / ↑", "Move cursor up"},
 	{"enter", "Mark selected task as done"},
+	{"tab", "Cycle task priority (Top → High → No Priority)"},
 	{"p", "Start / pause / resume Pomodoro"},
 	{"b", "Start 5-min break (after pomodoro finishes)"},
 	{"s", "Stop Pomodoro / Break"},

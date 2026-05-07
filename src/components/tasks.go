@@ -39,6 +39,10 @@ type NotionPage struct {
 	Properties map[string]NotionProperty `json:"properties"`
 }
 type TasksMsg []NotionTask
+type PriorityTasksMsg struct {
+	Priority string
+	Tasks    []NotionTask
+}
 type TaskErrMsg struct{ Err error }
 type TaskDoneMsg struct{ ID string }
 type ClearFlashMsg struct{ ID string }
@@ -130,6 +134,88 @@ func FetchTasks(apiKey string, dbID string) tea.Cmd {
 	}
 }
 
+func FetchTasksByPriority(apiKey, dbID, priority string) tea.Cmd {
+	return func() tea.Msg {
+		if apiKey == "" || dbID == "" {
+			return TaskErrMsg{Err: fmt.Errorf("Notion credentials not set")}
+		}
+		url := fmt.Sprintf("https://api.notion.com/v1/databases/%s/query", dbID)
+
+		payloadStr := fmt.Sprintf(`{
+            "page_size": 10,
+            "filter": {
+                "and": [
+                    {
+                        "property": "Status",
+                        "status": {
+                            "does_not_equal": "Done"
+                        }
+                    },
+                    {
+                        "property": "Priority",
+                        "select": {
+                            "equals": "%s"
+                        }
+                    }
+                ]
+            },
+            "sorts": [
+                {
+                    "property": "Due Date",
+                    "direction": "ascending"
+                }
+            ]
+        }`, priority)
+		payload := []byte(payloadStr)
+
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
+		if err != nil {
+			return TaskErrMsg{Err: fmt.Errorf("error building request: %w", err)}
+		}
+
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("Notion-Version", "2022-06-28")
+		req.Header.Set("Content-Type", "application/json")
+
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return TaskErrMsg{Err: fmt.Errorf("error reaching Notion: %w", err)}
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return TaskErrMsg{Err: fmt.Errorf("Notion API error %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))}
+		}
+
+		var notionResp NotionResponse
+		if err := json.NewDecoder(resp.Body).Decode(&notionResp); err != nil {
+			return TaskErrMsg{Err: fmt.Errorf("error parsing Notion response: %w", err)}
+		}
+
+		var tasks []NotionTask
+		for _, page := range notionResp.Results {
+			title := "Untitled"
+			for _, prop := range page.Properties {
+				if prop.Type == "title" && len(prop.Title) > 0 {
+					title = prop.Title[0].PlainText
+					break
+				}
+			}
+
+			dateStr := ""
+			if dueProp, ok := page.Properties["Due Date"]; ok && dueProp.Date != nil {
+				dateStr = fmt.Sprintf(" (Due: %s)", dueProp.Date.Start)
+			}
+
+			tasks = append(tasks, NotionTask{ID: page.ID, Label: title + dateStr})
+		}
+
+		return PriorityTasksMsg{Priority: priority, Tasks: tasks}
+	}
+}
+
 func MarkTaskDone(pageID, apiKey string) tea.Cmd {
 	return func() tea.Msg {
 		payload := []byte(`{"properties":{"Status":{"status":{"name":"Done"}}}}`)
@@ -160,7 +246,7 @@ func MarkTaskDone(pageID, apiKey string) tea.Cmd {
 	}
 }
 
-func RenderTasks(sized lipgloss.Style, tasks []NotionTask, cursor int, innerWidth int) string {
+func RenderTasks(sized lipgloss.Style, tasks []NotionTask, cursor int, innerWidth int, currentPriority string) string {
 	pendingStyle := lipgloss.NewStyle().
 		Foreground(theme.GlobalTheme.Warning).
 		Bold(true)
@@ -193,8 +279,29 @@ func RenderTasks(sized lipgloss.Style, tasks []NotionTask, cursor int, innerWidt
 		}
 	}
 
+	priorities := []string{"Top", "High", "No Priority"}
+	priorityColors := map[string]lipgloss.Color{
+		"Top":         theme.GlobalTheme.Error,
+		"High":        theme.GlobalTheme.Warning,
+		"No Priority": theme.GlobalTheme.TextMuted,
+	}
+
+	activeStyle := lipgloss.NewStyle().Bold(true)
+	inactiveStyle := lipgloss.NewStyle().Foreground(theme.GlobalTheme.TextMuted)
+
+	var priorityTabs []string
+	for _, p := range priorities {
+		if p == currentPriority {
+			tab := activeStyle.Foreground(priorityColors[p]).Render("▶ " + strings.ToUpper(p))
+			priorityTabs = append(priorityTabs, tab)
+		} else {
+			priorityTabs = append(priorityTabs, inactiveStyle.Render("▷ "+p))
+		}
+	}
+	priorityBar := "  " + strings.Join(priorityTabs, "  ")
+
 	tasksBox := sized.Render(
-		theme.TitleStyle.Render("✅ Notion Tasks") + "\n" + tasksContent,
+		theme.TitleStyle.Render("✅ Notion Tasks") + "\n" + priorityBar + "\n" + tasksContent,
 	)
 
 	return tasksBox

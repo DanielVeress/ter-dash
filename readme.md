@@ -19,12 +19,17 @@ A terminal dashboard built with [Bubble Tea](https://github.com/charmbracelet/bu
 
 ## Keybindings
 
-| Key            | Action                     |
-| -------------- | -------------------------- |
-| `j` / `↓`      | Move cursor down           |
-| `k` / `↑`      | Move cursor up             |
-| `Enter`        | Mark selected task as done |
-| `q` / `Ctrl+C` | Quit                       |
+| Key            | Action                                        |
+| -------------- | --------------------------------------------- |
+| `j` / `↓`      | Move cursor down                              |
+| `k` / `↑`      | Move cursor up                                |
+| `Enter`        | Mark selected task as done                    |
+| `Tab`          | Cycle task priority (Top → High → No Priority)|
+| `p`            | Start / pause / resume Pomodoro               |
+| `b`            | Start 5-min break (after Pomodoro finishes)   |
+| `s`            | Stop Pomodoro / Break                         |
+| `?`            | Toggle help                                   |
+| `q` / `Ctrl+C` | Quit                                          |
 
 ## Requirements
 
@@ -48,7 +53,7 @@ On first run, you will be prompted to enter your Notion API key and database ID.
 2. Copy the **Internal Integration Token** — this is your API key.
 3. Open the Notion database you want to track and share it with your integration.
 4. Copy the database ID from the URL: `notion.so/<workspace>/<database_id>?v=...`
-5. Your database needs a **Status** property (type: Status) and optionally a **Due Date** property (type: Date).
+5. Your database needs a **Status** property (type: Status), a **Priority** property (type: Select) with values `Top`, `High`, and `No Priority`, and optionally a **Due Date** property (type: Date).
 
 ## Planned Features
 
