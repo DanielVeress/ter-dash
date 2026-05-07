@@ -57,6 +57,7 @@ type model struct {
 	breakActive                bool
 	breakStart                 time.Time
 	showHelp    bool
+	hideAux     bool
 	err         error
 }
 
@@ -103,6 +104,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "?":
 			m.showHelp = !m.showHelp
+			return m, nil
+		case "h":
+			m.hideAux = !m.hideAux
 			return m, nil
 		case "j", "down":
 			if m.cursor < len(m.tasks)-1 {
@@ -364,6 +368,13 @@ func renderRightColumn(m model, dims layoutDims) string {
 	return components.RenderTasks(dims.sized, m.tasks, m.cursor, dims.innerWidth, m.currentPriority)
 }
 
+func renderFocused(m model, dims layoutDims, elapsed, remaining time.Duration, breakElapsed time.Duration) string {
+	pomStyle := theme.BoxStyle.Width(dims.colWidth)
+	pomodoroBox := components.RenderPomodoro(pomStyle, m.pomodoroActive, m.pomodoroPaused, remaining, m.pomodoroCount, elapsed, dims.innerWidth, m.pomodoroHistory, m.breakActive, breakElapsed)
+	tasksBox := components.RenderTasks(dims.sized, m.tasks, m.cursor, dims.innerWidth, m.currentPriority)
+	return lipgloss.JoinHorizontal(lipgloss.Top, pomodoroBox, tasksBox)
+}
+
 func renderStatusBar(m model, width int) string {
 	if m.err == nil {
 		return ""
@@ -400,10 +411,15 @@ func (m model) View() string {
 	}
 
 	header := components.RenderHeader(m.time, m.weather)
-	grid := lipgloss.JoinHorizontal(lipgloss.Top,
-		renderLeftColumn(m, dims, elapsed, remaining, breakElapsed),
-		renderRightColumn(m, dims),
-	)
+	var grid string
+	if m.hideAux {
+		grid = renderFocused(m, dims, elapsed, remaining, breakElapsed)
+	} else {
+		grid = lipgloss.JoinHorizontal(lipgloss.Top,
+			renderLeftColumn(m, dims, elapsed, remaining, breakElapsed),
+			renderRightColumn(m, dims),
+		)
+	}
 
 	rows := []string{header, grid}
 	if m.err != nil {
